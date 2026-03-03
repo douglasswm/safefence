@@ -6,6 +6,9 @@ export type Phase =
   | "agent_end";
 
 export type Decision = "ALLOW" | "REDACT" | "DENY";
+export type PrincipalRole = "owner" | "admin" | "member" | "unknown";
+export type ChannelType = "dm" | "group" | "thread" | "unknown";
+export type DataClass = "public" | "internal" | "restricted" | "secret";
 
 export interface AllowedCommand {
   binary: string;
@@ -13,11 +16,30 @@ export interface AllowedCommand {
   allowShellOperators?: boolean;
 }
 
+export interface PrincipalContext {
+  senderId: string;
+  senderHandle?: string;
+  role: PrincipalRole;
+  channelId?: string;
+  conversationId: string;
+  channelType: ChannelType;
+  mentionedAgent?: boolean;
+  pairedDevice?: boolean;
+}
+
+export interface ApprovalContext {
+  token?: string;
+  requestId?: string;
+}
+
 export interface GuardMetadata extends Record<string, unknown> {
   sourceType?: "user" | "retrieval" | "tool";
   sourceId?: string;
   trustLevel?: "low" | "medium" | "high";
   sourceSignatureValid?: boolean;
+  principal?: PrincipalContext;
+  approval?: ApprovalContext;
+  dataClass?: DataClass;
 }
 
 export interface GuardrailsConfig {
@@ -65,6 +87,31 @@ export interface GuardrailsConfig {
     minimumTrustLevel: "high" | "medium";
     requireSignedSource: boolean;
   };
+  principal: {
+    requireContext: boolean;
+    ownerIds: string[];
+    adminIds: string[];
+    failUnknownInGroup: boolean;
+  };
+  authorization: {
+    defaultEffect: "deny" | "allow";
+    requireMentionInGroups: boolean;
+    restrictedTools: string[];
+    restrictedDataClasses: Array<Exclude<DataClass, "public">>;
+    toolAllowByRole: Record<PrincipalRole, string[]>;
+  };
+  approval: {
+    enabled: boolean;
+    ttlSeconds: number;
+    requireForTools: string[];
+    requireForDataClasses: Array<"restricted" | "secret">;
+    ownerQuorum: number;
+    bindToConversation: boolean;
+  };
+  tenancy: {
+    budgetKeyMode: "agent" | "agent+principal+conversation";
+    redactCrossPrincipalOutput: boolean;
+  };
 }
 
 export interface GuardEvent {
@@ -81,6 +128,12 @@ export interface GuardDecision {
   reasonCodes: string[];
   riskScore: number;
   redactedContent?: string;
+  approvalChallenge?: {
+    requestId: string;
+    expiresAt: number;
+    reason: string;
+    requiredRole: "owner" | "admin";
+  };
   telemetry: {
     matchedRules: string[];
     elapsedMs: number;

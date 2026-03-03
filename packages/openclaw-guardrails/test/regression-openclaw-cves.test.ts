@@ -16,6 +16,15 @@ describe("regression: openclaw advisory classes", () => {
       toolName: "exec",
       args: {
         gatewayUrl: "http://8.8.8.8/relay"
+      },
+      metadata: {
+        principal: {
+          senderId: "member-1",
+          role: "member",
+          channelType: "group",
+          conversationId: "conv-1",
+          mentionedAgent: true
+        }
       }
     });
 
@@ -34,6 +43,15 @@ describe("regression: openclaw advisory classes", () => {
         source: "https://github.com/openclaw/safe-skill",
         targetDir: "../../../../tmp/owned",
         hash: "sha256:trusted"
+      },
+      metadata: {
+        principal: {
+          senderId: "member-1",
+          role: "member",
+          channelType: "group",
+          conversationId: "conv-1",
+          mentionedAgent: true
+        }
       }
     });
 
@@ -61,6 +79,15 @@ describe("regression: openclaw advisory classes", () => {
       toolName: "read",
       args: {
         path: symlinkPath
+      },
+      metadata: {
+        principal: {
+          senderId: "member-1",
+          role: "member",
+          channelType: "group",
+          conversationId: "conv-1",
+          mentionedAgent: true
+        }
       }
     });
 

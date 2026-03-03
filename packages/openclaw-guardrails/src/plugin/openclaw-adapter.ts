@@ -2,9 +2,11 @@ import { GuardrailsEngine } from "../core/engine.js";
 import { REASON_CODES } from "../core/reason-codes.js";
 import { createDefaultConfig, mergeConfig } from "../rules/default-policy.js";
 import type {
+  DataClass,
   GuardDecision,
   GuardEvent,
   GuardrailsConfig,
+  PrincipalRole,
   Phase
 } from "../core/types.js";
 
@@ -17,6 +19,15 @@ export interface OpenClawContext extends Record<string, unknown> {
   output?: string;
   prompt?: string;
   systemPrompt?: string;
+  senderId?: string;
+  senderHandle?: string;
+  role?: PrincipalRole;
+  conversationId?: string;
+  channelId?: string;
+  channelType?: "dm" | "group" | "thread" | "unknown";
+  mentionedAgent?: boolean;
+  pairedDevice?: boolean;
+  dataClass?: DataClass;
   metadata?: Record<string, unknown>;
 }
 
@@ -31,6 +42,11 @@ export interface OpenClawHookResult extends OpenClawContext {
 export interface OpenClawPlugin {
   name: string;
   version: string;
+  approveRequest: (
+    requestId: string,
+    approverId: string,
+    approverRole: "owner" | "admin"
+  ) => string | null;
   hooks: {
     before_agent_start: (context: OpenClawContext) => Promise<OpenClawHookResult>;
     message_received: (context: OpenClawContext) => Promise<OpenClawHookResult>;
@@ -50,6 +66,10 @@ interface Metrics {
   budgetExceeded: number;
   provenanceBlocked: number;
   networkBlocked: number;
+  approvalRequired: number;
+  approvalDenied: number;
+  principalDenied: number;
+  restrictedInfoRedacted: number;
 }
 
 function buildGuardPrompt(config: GuardrailsConfig): string {
@@ -92,6 +112,40 @@ function toEvent(
 ): Partial<GuardEvent> & Record<string, unknown> {
   const content =
     context.content ?? context.message ?? context.output ?? context.prompt;
+  const metadata = { ...(context.metadata ?? {}) };
+  const principal = {
+    senderId:
+      (context.senderId as string | undefined) ??
+      (metadata.senderId as string | undefined),
+    senderHandle:
+      (context.senderHandle as string | undefined) ??
+      (metadata.senderHandle as string | undefined),
+    role: (context.role as PrincipalRole | undefined) ?? (metadata.role as PrincipalRole | undefined),
+    channelId:
+      (context.channelId as string | undefined) ??
+      (metadata.channelId as string | undefined),
+    conversationId:
+      (context.conversationId as string | undefined) ??
+      (metadata.conversationId as string | undefined),
+    channelType:
+      (context.channelType as "dm" | "group" | "thread" | "unknown" | undefined) ??
+      (metadata.channelType as "dm" | "group" | "thread" | "unknown" | undefined),
+    mentionedAgent:
+      (context.mentionedAgent as boolean | undefined) ??
+      (metadata.mentionedAgent as boolean | undefined),
+    pairedDevice:
+      (context.pairedDevice as boolean | undefined) ??
+      (metadata.pairedDevice as boolean | undefined)
+  };
+
+  metadata.principal = {
+    ...(metadata.principal as Record<string, unknown> | undefined),
+    ...principal
+  };
+
+  if (context.dataClass || metadata.dataClass) {
+    metadata.dataClass = context.dataClass ?? metadata.dataClass;
+  }
 
   return {
     phase,
@@ -99,7 +153,7 @@ function toEvent(
     toolName: context.toolName,
     args: context.args,
     content,
-    metadata: context.metadata
+    metadata
   };
 }
 
@@ -113,7 +167,11 @@ function createMetrics(): Metrics {
     blocked: 0,
     budgetExceeded: 0,
     provenanceBlocked: 0,
-    networkBlocked: 0
+    networkBlocked: 0,
+    approvalRequired: 0,
+    approvalDenied: 0,
+    principalDenied: 0,
+    restrictedInfoRedacted: 0
   };
 }
 
@@ -163,6 +221,33 @@ function updateMetrics(metrics: Metrics, decision: GuardDecision): void {
   ) {
     metrics.networkBlocked += 1;
   }
+
+  if (decision.reasonCodes.includes(REASON_CODES.OWNER_APPROVAL_REQUIRED)) {
+    metrics.approvalRequired += 1;
+  }
+
+  if (
+    decision.reasonCodes.includes(REASON_CODES.OWNER_APPROVAL_INVALID) ||
+    decision.reasonCodes.includes(REASON_CODES.OWNER_APPROVAL_EXPIRED) ||
+    decision.reasonCodes.includes(REASON_CODES.OWNER_APPROVAL_REPLAYED)
+  ) {
+    metrics.approvalDenied += 1;
+  }
+
+  if (
+    decision.reasonCodes.includes(REASON_CODES.PRINCIPAL_CONTEXT_MISSING) ||
+    decision.reasonCodes.includes(REASON_CODES.GROUP_SENDER_NOT_ALLOWED) ||
+    decision.reasonCodes.includes(REASON_CODES.ROLE_TOOL_NOT_ALLOWED)
+  ) {
+    metrics.principalDenied += 1;
+  }
+
+  if (
+    decision.reasonCodes.includes(REASON_CODES.RESTRICTED_INFO_ROLE_BLOCKED) &&
+    (decision.decision === "REDACT" || Boolean(decision.redactedContent))
+  ) {
+    metrics.restrictedInfoRedacted += 1;
+  }
 }
 
 export function createOpenClawGuardrailsPlugin(
@@ -184,7 +269,12 @@ export function createOpenClawGuardrailsPlugin(
 
   return {
     name: "openclaw-guardrails",
-    version: "0.2.0",
+    version: "0.3.0",
+    approveRequest: (
+      requestId: string,
+      approverId: string,
+      approverRole: "owner" | "admin"
+    ): string | null => engine.approveRequest(requestId, approverId, approverRole),
     hooks: {
       async before_agent_start(context: OpenClawContext): Promise<OpenClawHookResult> {
         const decision = await evaluate("before_agent_start", context);

@@ -1,6 +1,6 @@
 {
   "name": "openclaw-guardrails",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Deterministic local guardrails for OpenClaw hooks",
   "entry": "dist/index.js",
   "hooks": [

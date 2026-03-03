@@ -1,7 +1,11 @@
 export { GuardrailsEngine } from "./core/engine.js";
 export { REASON_CODES } from "./core/reason-codes.js";
 export type {
+  ChannelType,
+  DataClass,
   Decision,
+  PrincipalContext,
+  PrincipalRole,
   GuardDecision,
   GuardEvent,
   GuardrailsConfig,

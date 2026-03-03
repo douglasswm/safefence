@@ -3,16 +3,29 @@ import { REASON_CODES } from "../reason-codes.js";
 import type { RuleHit } from "../types.js";
 import type { DetectorContext } from "./types.js";
 
+function toBudgetKey(context: DetectorContext): string {
+  const { event, config } = context;
+  if (config.tenancy.budgetKeyMode === "agent") {
+    return event.agentId;
+  }
+
+  const principal = event.metadata.principal;
+  const conversationId = principal?.conversationId ?? "unknown-conversation";
+  const senderId = principal?.senderId ?? "unknown-sender";
+  return `${event.agentId}|${conversationId}|${senderId}`;
+}
+
 export function detectBudget(
   context: DetectorContext,
   budgetStore: BudgetStore
 ): RuleHit[] {
   const { event, config } = context;
   const hits: RuleHit[] = [];
+  const budgetKey = toBudgetKey(context);
 
   if (
     budgetStore.checkAndRecord(
-      event.agentId,
+      budgetKey,
       "request",
       config.limits.maxRequestsPerMinute
     )
@@ -28,7 +41,7 @@ export function detectBudget(
   if (
     event.phase === "before_tool_call" &&
     budgetStore.checkAndRecord(
-      event.agentId,
+      budgetKey,
       "toolCall",
       config.limits.maxToolCallsPerMinute
     )

@@ -75,11 +75,61 @@ describe("openclaw adapter", () => {
     });
 
     const summary = result.metadata?.guardrailsSummary as
-      | { total: number; auditWouldBlock: number; blocked: number; redacted: number }
+      | {
+          total: number;
+          auditWouldBlock: number;
+          blocked: number;
+          redacted: number;
+          approvalRequired: number;
+          principalDenied: number;
+        }
       | undefined;
 
     expect(summary).toBeDefined();
     expect(summary?.total).toBeGreaterThan(0);
     expect(summary?.auditWouldBlock).toBeGreaterThan(0);
+  });
+
+  it("maps principal metadata and exposes owner approval flow", async () => {
+    const plugin = createOpenClawGuardrailsPlugin({
+      workspaceRoot: "/workspace/project"
+    });
+
+    const blocked = await plugin.hooks.before_tool_call({
+      agentId: "agent-1",
+      toolName: "exec",
+      args: { cmd: "ls" },
+      senderId: "member-1",
+      role: "member",
+      channelType: "group",
+      conversationId: "conv-1",
+      mentionedAgent: true
+    });
+
+    expect(blocked.blocked).toBe(true);
+    const challenge = blocked.guardrails?.decision.approvalChallenge;
+    expect(challenge?.requestId).toBeTruthy();
+
+    const token = plugin.approveRequest(challenge?.requestId as string, "owner-1", "owner");
+    expect(token).toBeTruthy();
+
+    const allowed = await plugin.hooks.before_tool_call({
+      agentId: "agent-1",
+      toolName: "exec",
+      args: { cmd: "ls" },
+      senderId: "member-1",
+      role: "member",
+      channelType: "group",
+      conversationId: "conv-1",
+      mentionedAgent: true,
+      metadata: {
+        approval: {
+          token: token ?? undefined
+        }
+      }
+    });
+
+    expect(allowed.blocked).toBeUndefined();
+    expect(allowed.guardrails?.decision.decision).toBe("ALLOW");
   });
 });

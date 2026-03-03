@@ -4,5 +4,8 @@ export { detectPathCanonical } from "./path-canonical-detector.js";
 export { detectNetworkEgress } from "./network-egress-detector.js";
 export { detectSensitiveData } from "./sensitive-data-detector.js";
 export { detectOutputSafety } from "./output-safety-detector.js";
+export { detectRestrictedInfo } from "./restricted-info-detector.js";
 export { detectBudget } from "./budget-detector.js";
 export { detectProvenance } from "./provenance-detector.js";
+export { detectPrincipalAuthz } from "./principal-authz-detector.js";
+export { detectOwnerApproval } from "./owner-approval-detector.js";

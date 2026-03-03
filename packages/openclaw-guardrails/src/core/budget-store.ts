@@ -6,10 +6,10 @@ interface AgentBudget {
 }
 
 export class BudgetStore {
-  private readonly perAgent = new Map<string, AgentBudget>();
+  private readonly perKey = new Map<string, AgentBudget>();
 
   checkAndRecord(
-    agentId: string,
+    subjectKey: string,
     kind: BudgetKind,
     limitPerMinute: number,
     nowMs = Date.now()
@@ -18,7 +18,7 @@ export class BudgetStore {
       return true;
     }
 
-    const budget = this.getOrCreateAgentBudget(agentId);
+    const budget = this.getOrCreateAgentBudget(subjectKey);
     const bucket = kind === "request" ? budget.requests : budget.toolCalls;
 
     const windowStart = nowMs - 60_000;
@@ -30,8 +30,8 @@ export class BudgetStore {
     return bucket.length > limitPerMinute;
   }
 
-  private getOrCreateAgentBudget(agentId: string): AgentBudget {
-    const current = this.perAgent.get(agentId);
+  private getOrCreateAgentBudget(subjectKey: string): AgentBudget {
+    const current = this.perKey.get(subjectKey);
     if (current) {
       return current;
     }
@@ -41,7 +41,7 @@ export class BudgetStore {
       toolCalls: []
     };
 
-    this.perAgent.set(agentId, created);
+    this.perKey.set(subjectKey, created);
     return created;
   }
 }

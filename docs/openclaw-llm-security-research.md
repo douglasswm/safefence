@@ -185,6 +185,65 @@ Minimum baseline for production:
 | Missing retrieval trust gates | Retrieval poisoning can trigger tools | Closed | `src/core/retrieval-trust.ts`, `detectors/provenance-detector.ts` |
 | OWASP LLM04/08/09 not implemented | Trust and provenance blind spots | Closed (local policy layer) | `retrievalTrust` config + provenance detector |
 
+## Multi-User / Group Attack Surface Matrix (Guardrails v3)
+
+| Attack Surface | Example Exploit Path | v3 Control | Status |
+|---|---|---|---|
+| Cross-user privilege confusion | Group member triggers owner-grade tools | Principal normalization + role tool policy | Closed |
+| Missing sender identity in group | Unknown sender invokes tool chain | `PRINCIPAL_CONTEXT_MISSING` fail-closed in groups | Closed |
+| Group message abuse without mention | Ambient group chatter triggers automation | `requireMentionInGroups` gate | Closed |
+| Restricted data over-sharing | Non-owner asks for restricted/secret content | Role-aware restricted-info policy + redaction | Closed |
+| Weak approval semantics | Static “confirm” bypass or replay | One-time token with TTL + digest + replay checks | Closed |
+| Budget starvation between users | One sender consumes all request budget | Per principal+conversation budget keys | Closed |
+| Approval reuse in new context | Reuse old approval in another conversation | Conversation-bound approval token validation | Closed |
+
+## Baseline Gap Closure Status (Guardrails v3)
+
+| Gap | v2 Limitation | v3 Closure |
+|---|---|---|
+| Agent-centric authorization | No sender/role model | Added principal model (`owner/admin/member/unknown`) |
+| No owner approval workflow | No deterministic challenge/token flow | Added approval broker + store + token verification |
+| Budget scope too broad | Per-agent only | Per `agent+principal+conversation` budgets |
+| Restricted info policy not role-aware | Regex-only secret/PII handling | Added data-class + role-aware restricted-info detector |
+| Group-safe defaults missing | No mention/sender role gating | Added group mention gate and unknown-sender fail-close |
+
+## v3 Secure Config Delta (Principal + Approval)
+
+```json
+{
+  "principal": {
+    "requireContext": true,
+    "ownerIds": ["owner-user-id"],
+    "adminIds": [],
+    "failUnknownInGroup": true
+  },
+  "authorization": {
+    "defaultEffect": "deny",
+    "requireMentionInGroups": true,
+    "restrictedTools": ["exec", "process", "write", "edit", "apply_patch", "skills.install"],
+    "restrictedDataClasses": ["internal", "restricted", "secret"],
+    "toolAllowByRole": {
+      "owner": ["read", "write", "edit", "exec", "process", "apply_patch", "search", "skills.install"],
+      "admin": ["read", "write", "edit", "exec", "process", "search"],
+      "member": ["read", "search"],
+      "unknown": []
+    }
+  },
+  "approval": {
+    "enabled": true,
+    "ttlSeconds": 300,
+    "requireForTools": ["exec", "process", "write", "edit", "apply_patch", "skills.install"],
+    "requireForDataClasses": ["restricted", "secret"],
+    "ownerQuorum": 1,
+    "bindToConversation": true
+  },
+  "tenancy": {
+    "budgetKeyMode": "agent+principal+conversation",
+    "redactCrossPrincipalOutput": true
+  }
+}
+```
+
 ## Secure-by-Default Config Template (for this plugin)
 
 ```json
@@ -278,5 +337,10 @@ Minimum baseline for production:
 - NVD CVE-2026-26322: https://nvd.nist.gov/vuln/detail/CVE-2026-26322
 - NVD CVE-2026-27008: https://nvd.nist.gov/vuln/detail/CVE-2026-27008
 - OpenClaw docs (agent loop/hardening/sandbox): https://docs.openclaw.ai/
+- OpenClaw session management: https://docs.openclaw.ai/features/session-management/
+- OpenClaw group channels: https://docs.openclaw.ai/features/group-channels/
+- OpenClaw securing your setup: https://docs.openclaw.ai/security/securing-your-setup/
+- OpenClaw exec approvals: https://docs.openclaw.ai/features/exec-approvals/
 - Knostic openclaw-shield (reference): https://github.com/knostic/openclaw-shield
+- ClawGuardian (reference): https://github.com/superglue-ai/clawguardian
 - Guardrails AI (reference only): https://guardrailsai.com/

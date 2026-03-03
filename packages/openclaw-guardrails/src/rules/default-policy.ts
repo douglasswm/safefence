@@ -10,6 +10,15 @@ import {
 } from "./patterns.js";
 
 export function createDefaultConfig(workspaceRoot: string): GuardrailsConfig {
+  const defaultRestrictedTools = [
+    "exec",
+    "process",
+    "write",
+    "edit",
+    "apply_patch",
+    "skills.install"
+  ];
+
   return {
     mode: "enforce",
     failClosed: true,
@@ -77,6 +86,45 @@ export function createDefaultConfig(workspaceRoot: string): GuardrailsConfig {
       requiredForToolExecution: true,
       minimumTrustLevel: "medium",
       requireSignedSource: false
+    },
+    principal: {
+      requireContext: true,
+      ownerIds: [],
+      adminIds: [],
+      failUnknownInGroup: true
+    },
+    authorization: {
+      defaultEffect: "deny",
+      requireMentionInGroups: true,
+      restrictedTools: defaultRestrictedTools,
+      restrictedDataClasses: ["internal", "restricted", "secret"],
+      toolAllowByRole: {
+        owner: [
+          "read",
+          "write",
+          "edit",
+          "exec",
+          "process",
+          "apply_patch",
+          "search",
+          "skills.install"
+        ],
+        admin: ["read", "write", "edit", "exec", "process", "search"],
+        member: ["read", "search"],
+        unknown: []
+      }
+    },
+    approval: {
+      enabled: true,
+      ttlSeconds: 300,
+      requireForTools: defaultRestrictedTools,
+      requireForDataClasses: ["restricted", "secret"],
+      ownerQuorum: 1,
+      bindToConversation: true
+    },
+    tenancy: {
+      budgetKeyMode: "agent+principal+conversation",
+      redactCrossPrincipalOutput: true
     }
   };
 }
@@ -130,6 +178,26 @@ export function mergeConfig(
       ...base.supplyChain,
       ...(overrides.supplyChain ?? {})
     },
-    retrievalTrust
+    retrievalTrust,
+    principal: {
+      ...base.principal,
+      ...(overrides.principal ?? {})
+    },
+    authorization: {
+      ...base.authorization,
+      ...(overrides.authorization ?? {}),
+      toolAllowByRole: {
+        ...base.authorization.toolAllowByRole,
+        ...(overrides.authorization?.toolAllowByRole ?? {})
+      }
+    },
+    approval: {
+      ...base.approval,
+      ...(overrides.approval ?? {})
+    },
+    tenancy: {
+      ...base.tenancy,
+      ...(overrides.tenancy ?? {})
+    }
   };
 }

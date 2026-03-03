@@ -1,4 +1,17 @@
-import { detectBudget, detectCommandPolicy, detectInputIntent, detectNetworkEgress, detectOutputSafety, detectPathCanonical, detectProvenance, detectSensitiveData } from "./detectors/index.js";
+import { ApprovalBroker } from "./approval.js";
+import {
+  detectBudget,
+  detectCommandPolicy,
+  detectInputIntent,
+  detectNetworkEgress,
+  detectOutputSafety,
+  detectOwnerApproval,
+  detectPathCanonical,
+  detectPrincipalAuthz,
+  detectProvenance,
+  detectRestrictedInfo,
+  detectSensitiveData
+} from "./detectors/index.js";
 import type { DetectorContext } from "./detectors/types.js";
 import { BudgetStore } from "./budget-store.js";
 import { unique } from "./event-utils.js";
@@ -27,12 +40,23 @@ function decideFromHits(hits: RuleHit[]): Decision {
 
 export class GuardrailsEngine {
   private readonly budgetStore: BudgetStore;
+  private readonly approvalBroker: ApprovalBroker;
 
   constructor(
     private readonly config: GuardrailsConfig,
-    budgetStore?: BudgetStore
+    budgetStore?: BudgetStore,
+    approvalBroker?: ApprovalBroker
   ) {
     this.budgetStore = budgetStore ?? new BudgetStore();
+    this.approvalBroker = approvalBroker ?? new ApprovalBroker(config);
+  }
+
+  approveRequest(
+    requestId: string,
+    approverId: string,
+    approverRole: "owner" | "admin"
+  ): string | null {
+    return this.approvalBroker.approveRequest(requestId, approverId, approverRole);
   }
 
   async evaluate(
@@ -49,26 +73,42 @@ export class GuardrailsEngine {
       };
 
       const hits: RuleHit[] = [];
+      let approvalChallenge: GuardDecision["approvalChallenge"] | undefined;
 
       hits.push(...detectInputIntent(context));
       hits.push(...detectCommandPolicy(context));
       hits.push(...(await detectPathCanonical(context)));
       hits.push(...(await detectNetworkEgress(context)));
+      hits.push(...(await detectProvenance(context)));
+
+      const principalAuthzResult = detectPrincipalAuthz(context);
+      hits.push(...principalAuthzResult.hits);
+      const ownerApprovalResult = detectOwnerApproval(
+        context,
+        this.approvalBroker,
+        principalAuthzResult.approvalRequirement
+      );
+      hits.push(...ownerApprovalResult.hits);
+      approvalChallenge = ownerApprovalResult.approvalChallenge;
 
       const sensitiveResult = detectSensitiveData(context);
       hits.push(...sensitiveResult.hits);
 
+      const restrictedInfoResult = detectRestrictedInfo(context);
+      hits.push(...restrictedInfoResult.hits);
+
       const outputResult = detectOutputSafety(
         context,
-        sensitiveResult.redactedContent
+        restrictedInfoResult.redactedContent ?? sensitiveResult.redactedContent
       );
       hits.push(...outputResult.hits);
 
       hits.push(...detectBudget(context, this.budgetStore));
-      hits.push(...(await detectProvenance(context)));
 
       const redactedContent =
-        outputResult.redactedContent ?? sensitiveResult.redactedContent;
+        outputResult.redactedContent ??
+        restrictedInfoResult.redactedContent ??
+        sensitiveResult.redactedContent;
       const enforceDecision = decideFromHits(hits);
       const riskScore = aggregateRisk(hits);
       const elapsedMs = Date.now() - startedAt;
@@ -78,7 +118,8 @@ export class GuardrailsEngine {
         hits,
         riskScore,
         redactedContent,
-        elapsedMs
+        elapsedMs,
+        approvalChallenge
       );
     } catch {
       if (this.config.failClosed) {
@@ -110,7 +151,8 @@ export class GuardrailsEngine {
     hits: RuleHit[],
     riskScore: number,
     redactedContent: string | undefined,
-    elapsedMs: number
+    elapsedMs: number,
+    approvalChallenge?: GuardDecision["approvalChallenge"]
   ): GuardDecision {
     const reasonCodes = unique(hits.map((hit) => hit.reasonCode));
     const matchedRules = unique(hits.map((hit) => hit.ruleId));
@@ -128,6 +170,7 @@ export class GuardrailsEngine {
         redactedContent: this.config.redaction.applyInAuditMode
           ? redactedContent
           : undefined,
+        approvalChallenge,
         telemetry: {
           matchedRules: [
             `audit_would_${enforceDecision.toLowerCase()}`,
@@ -143,6 +186,7 @@ export class GuardrailsEngine {
       reasonCodes,
       riskScore,
       redactedContent,
+      approvalChallenge,
       telemetry: {
         matchedRules,
         elapsedMs
