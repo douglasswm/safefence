@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 export interface ApprovalRecord {
   requestId: string;
   actionDigest: string;
@@ -16,12 +19,19 @@ export interface ApprovalRecord {
 export class ApprovalStore {
   private readonly byRequestId = new Map<string, ApprovalRecord>();
   private readonly requestIdByToken = new Map<string, string>();
+  private readonly storagePath?: string;
+
+  constructor(storagePath?: string) {
+    this.storagePath = storagePath;
+    this.loadFromDisk();
+  }
 
   save(record: ApprovalRecord): void {
     this.byRequestId.set(record.requestId, record);
     if (record.token) {
       this.requestIdByToken.set(record.token, record.requestId);
     }
+    this.flushToDisk();
   }
 
   getByRequestId(requestId: string): ApprovalRecord | undefined {
@@ -53,6 +63,7 @@ export class ApprovalStore {
     };
     this.byRequestId.set(requestId, updated);
     this.requestIdByToken.set(token, requestId);
+    this.flushToDisk();
     return updated;
   }
 
@@ -66,6 +77,63 @@ export class ApprovalStore {
       usedAt
     };
     this.byRequestId.set(requestId, updated);
+    this.flushToDisk();
     return updated;
+  }
+
+  private loadFromDisk(): void {
+    if (!this.storagePath) {
+      return;
+    }
+
+    try {
+      if (!fs.existsSync(this.storagePath)) {
+        return;
+      }
+
+      const raw = fs.readFileSync(this.storagePath, "utf8");
+      const parsed = JSON.parse(raw) as ApprovalRecord[];
+
+      if (!Array.isArray(parsed)) {
+        return;
+      }
+
+      const nowMs = Date.now();
+      for (const record of parsed) {
+        if (!record || typeof record.requestId !== "string") {
+          continue;
+        }
+        if (record.expiresAt <= nowMs || record.usedAt) {
+          continue;
+        }
+        this.byRequestId.set(record.requestId, record);
+        if (record.token) {
+          this.requestIdByToken.set(record.token, record.requestId);
+        }
+      }
+    } catch {
+      // Fail closed at higher layers; ignore corrupted persistence artifacts here.
+    }
+  }
+
+  private flushToDisk(): void {
+    if (!this.storagePath) {
+      return;
+    }
+
+    try {
+      const dir = path.dirname(this.storagePath);
+      fs.mkdirSync(dir, { recursive: true });
+
+      const nowMs = Date.now();
+      const records = Array.from(this.byRequestId.values()).filter(
+        (record) => !record.usedAt && record.expiresAt > nowMs
+      );
+      const tempPath = `${this.storagePath}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify(records, null, 2), "utf8");
+      fs.renameSync(tempPath, this.storagePath);
+    } catch {
+      // Best-effort durability; in-memory state remains authoritative for this process.
+    }
   }
 }

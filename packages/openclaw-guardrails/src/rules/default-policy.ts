@@ -120,11 +120,20 @@ export function createDefaultConfig(workspaceRoot: string): GuardrailsConfig {
       requireForTools: defaultRestrictedTools,
       requireForDataClasses: ["restricted", "secret"],
       ownerQuorum: 1,
-      bindToConversation: true
+      bindToConversation: true,
+      storagePath: undefined
     },
     tenancy: {
       budgetKeyMode: "agent+principal+conversation",
       redactCrossPrincipalOutput: true
+    },
+    rollout: {
+      stage: "stage_c_full_enforce",
+      highRiskTools: defaultRestrictedTools
+    },
+    monitoring: {
+      falsePositiveThresholdPct: 3,
+      consecutiveDaysForTuning: 2
     }
   };
 }
@@ -198,6 +207,14 @@ export function mergeConfig(
     tenancy: {
       ...base.tenancy,
       ...(overrides.tenancy ?? {})
+    },
+    rollout: {
+      ...base.rollout,
+      ...(overrides.rollout ?? {})
+    },
+    monitoring: {
+      ...base.monitoring,
+      ...(overrides.monitoring ?? {})
     }
   };
 }

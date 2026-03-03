@@ -1,4 +1,5 @@
 import { GuardrailsEngine } from "../core/engine.js";
+import { unique } from "../core/event-utils.js";
 import { REASON_CODES } from "../core/reason-codes.js";
 import { createDefaultConfig, mergeConfig } from "../rules/default-policy.js";
 import type {
@@ -70,6 +71,7 @@ interface Metrics {
   approvalDenied: number;
   principalDenied: number;
   restrictedInfoRedacted: number;
+  falsePositiveAdjudications: number;
 }
 
 function buildGuardPrompt(config: GuardrailsConfig): string {
@@ -171,11 +173,16 @@ function createMetrics(): Metrics {
     approvalRequired: 0,
     approvalDenied: 0,
     principalDenied: 0,
-    restrictedInfoRedacted: 0
+    restrictedInfoRedacted: 0,
+    falsePositiveAdjudications: 0
   };
 }
 
-function updateMetrics(metrics: Metrics, decision: GuardDecision): void {
+function updateMetrics(
+  metrics: Metrics,
+  decision: GuardDecision,
+  context?: OpenClawContext
+): void {
   metrics.total += 1;
 
   if (decision.reasonCodes.includes(REASON_CODES.AUDIT_WOULD_DENY)) {
@@ -248,6 +255,81 @@ function updateMetrics(metrics: Metrics, decision: GuardDecision): void {
   ) {
     metrics.restrictedInfoRedacted += 1;
   }
+
+  if (context?.metadata?.guardrailsFeedback === "false_positive") {
+    metrics.falsePositiveAdjudications += 1;
+  }
+}
+
+function shouldEnforceInRollout(
+  config: GuardrailsConfig,
+  phase: Phase,
+  context: OpenClawContext
+): boolean {
+  if (config.rollout.stage === "stage_c_full_enforce") {
+    return true;
+  }
+
+  if (config.rollout.stage === "stage_a_audit") {
+    return false;
+  }
+
+  if (phase !== "before_tool_call") {
+    return false;
+  }
+
+  return Boolean(
+    context.toolName && config.rollout.highRiskTools.includes(context.toolName)
+  );
+}
+
+function applyRolloutPolicy(
+  config: GuardrailsConfig,
+  phase: Phase,
+  context: OpenClawContext,
+  decision: GuardDecision
+): GuardDecision {
+  if (decision.decision === "ALLOW") {
+    return decision;
+  }
+
+  if (shouldEnforceInRollout(config, phase, context)) {
+    return decision;
+  }
+
+  return {
+    ...decision,
+    decision: "ALLOW",
+    reasonCodes: unique([
+      REASON_CODES.ROLLOUT_AUDIT_OVERRIDE,
+      ...decision.reasonCodes
+    ]),
+    telemetry: {
+      ...decision.telemetry,
+      matchedRules: unique([
+        "rollout_audit_override",
+        ...decision.telemetry.matchedRules
+      ])
+    }
+  };
+}
+
+function buildMonitoringSnapshot(config: GuardrailsConfig, metrics: Metrics) {
+  const falsePositiveRatePct =
+    metrics.total === 0
+      ? 0
+      : Number(
+          ((metrics.falsePositiveAdjudications / metrics.total) * 100).toFixed(2)
+        );
+
+  return {
+    rolloutStage: config.rollout.stage,
+    falsePositiveRatePct,
+    falsePositiveThresholdPct: config.monitoring.falsePositiveThresholdPct,
+    consecutiveDaysForTuning: config.monitoring.consecutiveDaysForTuning,
+    requiresPolicyTuning:
+      falsePositiveRatePct > config.monitoring.falsePositiveThresholdPct
+  };
 }
 
 export function createOpenClawGuardrailsPlugin(
@@ -262,8 +344,9 @@ export function createOpenClawGuardrailsPlugin(
     phase: Phase,
     context: OpenClawContext
   ): Promise<GuardDecision> => {
-    const decision = await engine.evaluate(toEvent(phase, context), phase);
-    updateMetrics(metrics, decision);
+    const rawDecision = await engine.evaluate(toEvent(phase, context), phase);
+    const decision = applyRolloutPolicy(config, phase, context, rawDecision);
+    updateMetrics(metrics, decision, context);
     return decision;
   };
 
@@ -373,7 +456,8 @@ export function createOpenClawGuardrailsPlugin(
           guardrails: { decision },
           metadata: {
             ...(context.metadata ?? {}),
-            guardrailsSummary: { ...metrics }
+            guardrailsSummary: { ...metrics },
+            guardrailsMonitoring: buildMonitoringSnapshot(config, metrics)
           }
         };
       }

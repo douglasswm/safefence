@@ -3,6 +3,139 @@
   "version": "0.3.0",
   "description": "Deterministic local guardrails for OpenClaw hooks",
   "entry": "dist/index.js",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "mode": {
+        "type": "string",
+        "enum": ["enforce", "audit"],
+        "default": "enforce"
+      },
+      "failClosed": {
+        "type": "boolean",
+        "default": true
+      },
+      "workspaceRoot": {
+        "type": "string"
+      },
+      "principal": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "requireContext": { "type": "boolean", "default": true },
+          "ownerIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": []
+          },
+          "adminIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": []
+          },
+          "failUnknownInGroup": { "type": "boolean", "default": true }
+        }
+      },
+      "authorization": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "defaultEffect": {
+            "type": "string",
+            "enum": ["deny", "allow"],
+            "default": "deny"
+          },
+          "requireMentionInGroups": { "type": "boolean", "default": true },
+          "restrictedTools": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "restrictedDataClasses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["internal", "restricted", "secret"]
+            }
+          },
+          "toolAllowByRole": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "owner": { "type": "array", "items": { "type": "string" } },
+              "admin": { "type": "array", "items": { "type": "string" } },
+              "member": { "type": "array", "items": { "type": "string" } },
+              "unknown": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      },
+      "approval": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "ttlSeconds": { "type": "number", "default": 300 },
+          "requireForTools": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "requireForDataClasses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["restricted", "secret"]
+            }
+          },
+          "ownerQuorum": { "type": "number", "default": 1 },
+          "bindToConversation": { "type": "boolean", "default": true },
+          "storagePath": { "type": "string" }
+        }
+      },
+      "tenancy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "budgetKeyMode": {
+            "type": "string",
+            "enum": ["agent", "agent+principal+conversation"],
+            "default": "agent+principal+conversation"
+          },
+          "redactCrossPrincipalOutput": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "rollout": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "stage": {
+            "type": "string",
+            "enum": [
+              "stage_a_audit",
+              "stage_b_high_risk_enforce",
+              "stage_c_full_enforce"
+            ],
+            "default": "stage_c_full_enforce"
+          },
+          "highRiskTools": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "monitoring": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "falsePositiveThresholdPct": { "type": "number", "default": 3 },
+          "consecutiveDaysForTuning": { "type": "number", "default": 2 }
+        }
+      }
+    }
+  },
   "hooks": [
     "before_agent_start",
     "message_received",

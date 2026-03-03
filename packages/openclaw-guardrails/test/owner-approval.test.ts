@@ -1,9 +1,16 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { GuardrailsEngine } from "../src/core/engine.js";
 import { REASON_CODES } from "../src/core/reason-codes.js";
 import { createDefaultConfig } from "../src/rules/default-policy.js";
 
-function buildMemberToolEvent(conversationId = "conv-1", token?: string) {
+function buildMemberToolEvent(
+  conversationId = "conv-1",
+  token?: string,
+  requestId?: string
+) {
   return {
     phase: "before_tool_call" as const,
     agentId: "agent-1",
@@ -17,7 +24,7 @@ function buildMemberToolEvent(conversationId = "conv-1", token?: string) {
         conversationId,
         mentionedAgent: true
       },
-      approval: token ? { token } : undefined
+      approval: token ? { token, requestId } : undefined
     }
   };
 }
@@ -77,6 +84,14 @@ describe("owner approval", () => {
       REASON_CODES.OWNER_APPROVAL_INVALID
     );
 
+    const mismatchedRequestId = await engine.evaluate(
+      buildMemberToolEvent("conv-a", freshToken, "wrong-request-id")
+    );
+    expect(mismatchedRequestId.decision).toBe("DENY");
+    expect(mismatchedRequestId.reasonCodes).toContain(
+      REASON_CODES.OWNER_APPROVAL_INVALID
+    );
+
     vi.useRealTimers();
   });
 
@@ -98,5 +113,27 @@ describe("owner approval", () => {
       buildMemberToolEvent("conv-q", quorumApproval ?? undefined)
     );
     expect(allowed.decision).toBe("ALLOW");
+  });
+
+  it("persists approvals across engine restarts when storagePath is set", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-approval-"));
+    const storagePath = path.join(tempDir, "approval-store.json");
+
+    const config = createDefaultConfig("/workspace/project");
+    config.approval.storagePath = storagePath;
+
+    const firstEngine = new GuardrailsEngine(config);
+    const first = await firstEngine.evaluate(buildMemberToolEvent("conv-p"));
+    const requestId = first.approvalChallenge?.requestId as string;
+    const token = firstEngine.approveRequest(requestId, "owner-1", "owner");
+
+    expect(token).toBeTruthy();
+    expect(fs.existsSync(storagePath)).toBe(true);
+
+    const secondEngine = new GuardrailsEngine(config);
+    const afterRestart = await secondEngine.evaluate(
+      buildMemberToolEvent("conv-p", token ?? undefined, requestId)
+    );
+    expect(afterRestart.decision).toBe("ALLOW");
   });
 });

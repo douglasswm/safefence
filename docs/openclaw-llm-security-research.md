@@ -196,6 +196,9 @@ Minimum baseline for production:
 | Weak approval semantics | Static “confirm” bypass or replay | One-time token with TTL + digest + replay checks | Closed |
 | Budget starvation between users | One sender consumes all request budget | Per principal+conversation budget keys | Closed |
 | Approval reuse in new context | Reuse old approval in another conversation | Conversation-bound approval token validation | Closed |
+| Approval loss on restart | In-memory approval state reset | Optional persistent approval storage path | Closed |
+| Staged rollout drift | Manual rollout not encoded in plugin behavior | Native rollout stages with audit override controls | Closed |
+| Monitoring threshold not actionable | KPI thresholds documented only | Runtime monitoring snapshot with threshold signal | Closed |
 
 ## Baseline Gap Closure Status (Guardrails v3)
 

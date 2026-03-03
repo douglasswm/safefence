@@ -32,6 +32,11 @@ export interface ApprovalContext {
   requestId?: string;
 }
 
+export type RolloutStage =
+  | "stage_a_audit"
+  | "stage_b_high_risk_enforce"
+  | "stage_c_full_enforce";
+
 export interface GuardMetadata extends Record<string, unknown> {
   sourceType?: "user" | "retrieval" | "tool";
   sourceId?: string;
@@ -107,10 +112,19 @@ export interface GuardrailsConfig {
     requireForDataClasses: Array<"restricted" | "secret">;
     ownerQuorum: number;
     bindToConversation: boolean;
+    storagePath?: string;
   };
   tenancy: {
     budgetKeyMode: "agent" | "agent+principal+conversation";
     redactCrossPrincipalOutput: boolean;
+  };
+  rollout: {
+    stage: RolloutStage;
+    highRiskTools: string[];
+  };
+  monitoring: {
+    falsePositiveThresholdPct: number;
+    consecutiveDaysForTuning: number;
   };
 }
 

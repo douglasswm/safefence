@@ -52,7 +52,7 @@ export class ApprovalBroker {
     private readonly config: GuardrailsConfig,
     store?: ApprovalStore
   ) {
-    this.store = store ?? new ApprovalStore();
+    this.store = store ?? new ApprovalStore(config.approval.storagePath);
   }
 
   createChallenge({
@@ -142,6 +142,7 @@ export class ApprovalBroker {
   verifyAndConsumeToken(
     token: string,
     event: NormalizedEvent,
+    requestId?: string,
     nowMs = Date.now()
   ): ApprovalVerifyResult {
     const record = this.store.getByToken(token);
@@ -155,6 +156,10 @@ export class ApprovalBroker {
 
     if (record.usedAt) {
       return "replayed";
+    }
+
+    if (requestId && record.requestId !== requestId) {
+      return "invalid";
     }
 
     const principal = event.metadata.principal;

@@ -15,8 +15,11 @@ Native TypeScript security kernel for OpenClaw (`>=2026.2.25`) with deterministi
 - Principal-aware identity model (`owner/admin/member/unknown`).
 - Group-aware authorization (mention-gating + role tool policy).
 - One-time owner approval challenges with TTL, action digest binding, anti-replay.
+- Optional persistent approval store (`approval.storagePath`) for restart resilience.
 - Principal-partitioned budgets (`agent + principal + conversation`).
 - Restricted-info redaction for non-privileged group principals.
+- Rollout controls (`stage_a_audit`, `stage_b_high_risk_enforce`, `stage_c_full_enforce`).
+- Monitoring snapshot with false-positive threshold signaling.
 
 ## OWASP LLM Coverage
 
@@ -43,8 +46,8 @@ Native TypeScript security kernel for OpenClaw (`>=2026.2.25`) with deterministi
 1. Member in group requests restricted action.
 2. Engine returns `DENY` with `OWNER_APPROVAL_REQUIRED` and `approvalChallenge`.
 3. Owner/admin approves out-of-band and issues one-time token.
-4. Caller retries with `metadata.approval.token`.
-5. Engine verifies TTL, digest, conversation binding, and replay status.
+4. Caller retries with `metadata.approval.token` (and optionally `requestId`).
+5. Engine verifies TTL, digest, conversation binding, requestId (when provided), and replay status.
 6. Valid token allows reevaluation and execution.
 
 ## Usage
@@ -91,11 +94,20 @@ const plugin = createOpenClawGuardrailsPlugin({
     requireForTools: ["exec", "process", "write", "edit", "apply_patch", "skills.install"],
     requireForDataClasses: ["restricted", "secret"],
     ownerQuorum: 1,
-    bindToConversation: true
+    bindToConversation: true,
+    storagePath: "/workspace/project/.openclaw/approval-store.json"
   },
   tenancy: {
     budgetKeyMode: "agent+principal+conversation",
     redactCrossPrincipalOutput: true
+  },
+  rollout: {
+    stage: "stage_c_full_enforce",
+    highRiskTools: ["exec", "process", "write", "edit", "apply_patch", "skills.install"]
+  },
+  monitoring: {
+    falsePositiveThresholdPct: 3,
+    consecutiveDaysForTuning: 2
   }
 });
 ```
@@ -106,6 +118,7 @@ const plugin = createOpenClawGuardrailsPlugin({
 2. Pass sender/channel metadata in hook contexts (`senderId`, `conversationId`, `channelType`, `mentionedAgent`).
 3. Integrate owner approval handling via `approvalChallenge.requestId` + `plugin.approveRequest(...)`.
 4. Keep secure defaults unless you have a validated exception.
+5. Use `rollout.stage` for staged deployment and monitor `metadata.guardrailsMonitoring`.
 
 ## OpenClaw Group Hardening Baseline
 
@@ -125,5 +138,6 @@ const plugin = createOpenClawGuardrailsPlugin({
 
 ```bash
 npm test
+npm run test:coverage
 npm run build
 ```

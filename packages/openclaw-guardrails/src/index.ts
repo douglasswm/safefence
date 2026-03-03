@@ -6,6 +6,7 @@ export type {
   Decision,
   PrincipalContext,
   PrincipalRole,
+  RolloutStage,
   GuardDecision,
   GuardEvent,
   GuardrailsConfig,

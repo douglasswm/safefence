@@ -13,6 +13,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest"
   },
   "engines": {
@@ -27,8 +28,22 @@
   ],
   "license": "MIT",
   "devDependencies": {
+    "@vitest/coverage-v8": "^2.1.8",
     "@types/node": "^22.9.0",
     "typescript": "^5.6.3",
     "vitest": "^2.1.8"
+  },
+  "vitest": {
+    "coverage": {
+      "provider": "v8",
+      "reporter": ["text", "json-summary", "lcov"],
+      "include": ["src/core/**/*.ts", "src/plugin/**/*.ts"],
+      "thresholds": {
+        "lines": 80,
+        "functions": 80,
+        "branches": 70,
+        "statements": 80
+      }
+    }
   }
 }

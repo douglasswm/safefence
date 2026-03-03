@@ -30,7 +30,12 @@ export function detectOwnerApproval(
     };
   }
 
-  const verification = approvalBroker.verifyAndConsumeToken(token, context.event);
+  const requestId = context.event.metadata.approval?.requestId;
+  const verification = approvalBroker.verifyAndConsumeToken(
+    token,
+    context.event,
+    requestId
+  );
   if (verification === "valid") {
     return { hits: [] };
   }
