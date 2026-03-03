@@ -85,6 +85,24 @@ export function mergeConfig(
   base: GuardrailsConfig,
   overrides: Partial<GuardrailsConfig>
 ): GuardrailsConfig {
+  const retrievalTrust =
+    overrides.retrievalTrust || base.retrievalTrust
+      ? {
+          requiredForToolExecution:
+            overrides.retrievalTrust?.requiredForToolExecution ??
+            base.retrievalTrust?.requiredForToolExecution ??
+            true,
+          minimumTrustLevel:
+            overrides.retrievalTrust?.minimumTrustLevel ??
+            base.retrievalTrust?.minimumTrustLevel ??
+            "medium",
+          requireSignedSource:
+            overrides.retrievalTrust?.requireSignedSource ??
+            base.retrievalTrust?.requireSignedSource ??
+            false
+        }
+      : undefined;
+
   return {
     ...base,
     ...overrides,
@@ -112,9 +130,6 @@ export function mergeConfig(
       ...base.supplyChain,
       ...(overrides.supplyChain ?? {})
     },
-    retrievalTrust: {
-      ...(base.retrievalTrust ?? {}),
-      ...(overrides.retrievalTrust ?? {})
-    }
+    retrievalTrust
   };
 }
