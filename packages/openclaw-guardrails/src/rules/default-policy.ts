@@ -1,0 +1,120 @@
+import type { GuardrailsConfig } from "../core/types.js";
+import {
+  DEFAULT_COMMAND_PATTERNS,
+  DEFAULT_EXFILTRATION_PATTERNS,
+  DEFAULT_PATH_PATTERNS,
+  DEFAULT_PII_PATTERNS,
+  DEFAULT_PROMPT_INJECTION_PATTERNS,
+  DEFAULT_SHELL_OPERATOR_PATTERNS,
+  DEFAULT_SECRET_PATTERNS
+} from "./patterns.js";
+
+export function createDefaultConfig(workspaceRoot: string): GuardrailsConfig {
+  return {
+    mode: "enforce",
+    failClosed: true,
+    workspaceRoot,
+    allow: {
+      tools: [
+        "read",
+        "write",
+        "edit",
+        "exec",
+        "process",
+        "apply_patch",
+        "search",
+        "skills.install"
+      ],
+      commands: [
+        { binary: "ls" },
+        { binary: "cat" },
+        { binary: "rg" },
+        { binary: "find" },
+        { binary: "pwd" },
+        { binary: "echo" },
+        { binary: "git", argPattern: "^(status|diff)(\\s+.*)?$" },
+        { binary: "npm", argPattern: "^(test|run\\s+test)(\\s+.*)?$" }
+      ],
+      writablePaths: [workspaceRoot],
+      networkHosts: ["localhost", "127.0.0.1", "::1"],
+      allowPrivateEgress: false
+    },
+    deny: {
+      commandPatterns: DEFAULT_COMMAND_PATTERNS,
+      pathPatterns: DEFAULT_PATH_PATTERNS,
+      promptInjectionPatterns: DEFAULT_PROMPT_INJECTION_PATTERNS,
+      exfiltrationPatterns: DEFAULT_EXFILTRATION_PATTERNS,
+      shellOperatorPatterns: DEFAULT_SHELL_OPERATOR_PATTERNS
+    },
+    redaction: {
+      secretPatterns: DEFAULT_SECRET_PATTERNS,
+      piiPatterns: DEFAULT_PII_PATTERNS,
+      replacement: "[REDACTED]",
+      applyInAuditMode: true
+    },
+    limits: {
+      maxInputChars: 20_000,
+      maxToolArgChars: 10_000,
+      maxOutputChars: 50_000,
+      maxRequestsPerMinute: 120,
+      maxToolCallsPerMinute: 60
+    },
+    pathPolicy: {
+      enforceCanonicalRealpath: true,
+      denySymlinkTraversal: true
+    },
+    supplyChain: {
+      trustedSkillSources: [
+        "https://github.com/openclaw/",
+        "https://github.com/knostic/",
+        "github.com/openclaw/",
+        "github.com/knostic/"
+      ],
+      requireSkillHash: true,
+      allowedSkillHashes: []
+    },
+    retrievalTrust: {
+      requiredForToolExecution: true,
+      minimumTrustLevel: "medium",
+      requireSignedSource: false
+    }
+  };
+}
+
+export function mergeConfig(
+  base: GuardrailsConfig,
+  overrides: Partial<GuardrailsConfig>
+): GuardrailsConfig {
+  return {
+    ...base,
+    ...overrides,
+    allow: {
+      ...base.allow,
+      ...(overrides.allow ?? {})
+    },
+    deny: {
+      ...base.deny,
+      ...(overrides.deny ?? {})
+    },
+    redaction: {
+      ...base.redaction,
+      ...(overrides.redaction ?? {})
+    },
+    limits: {
+      ...base.limits,
+      ...(overrides.limits ?? {})
+    },
+    pathPolicy: {
+      ...base.pathPolicy,
+      ...(overrides.pathPolicy ?? {})
+    },
+    supplyChain: {
+      ...base.supplyChain,
+      ...(overrides.supplyChain ?? {})
+    },
+    retrievalTrust: {
+      ...(base.retrievalTrust ?? {}),
+      ...(overrides.retrievalTrust ?? {})
+    }
+  };
+}
