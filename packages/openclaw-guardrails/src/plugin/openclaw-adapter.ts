@@ -145,12 +145,36 @@ function upsertContentField(
   return { ...context, content: value };
 }
 
+// Known non-content keys that should never be scanned as outbound message text.
+const NON_CONTENT_KEYS = new Set([
+  "agentId", "toolName", "senderId", "senderHandle", "role",
+  "conversationId", "channelId", "channelType", "mentionedAgent",
+  "pairedDevice", "dataClass", "systemPrompt", "metadata"
+]);
+
+/**
+ * For outbound phases, aggregate ALL string values from the context so that
+ * we detect leaks regardless of which field OpenClaw puts the message in.
+ */
+function extractOutboundContent(context: OpenClawContext): string {
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(context)) {
+    if (NON_CONTENT_KEYS.has(key)) continue;
+    if (typeof value === "string" && value.length > 0) {
+      parts.push(value);
+    }
+  }
+  return parts.join("\n");
+}
+
 function toEvent(
   phase: Phase,
   context: OpenClawContext
 ): Partial<GuardEvent> & Record<string, unknown> {
-  const content =
-    context.content ?? context.message ?? context.output ?? context.prompt ?? context.text ?? context.response;
+  const isOutbound = phase === "message_sending" || phase === "tool_result_persist";
+  const content = isOutbound
+    ? extractOutboundContent(context)
+    : (context.content ?? context.message ?? context.output ?? context.prompt ?? context.text ?? context.response);
   const metadata = { ...(context.metadata ?? {}) };
   const principal = {
     senderId:
@@ -403,7 +427,7 @@ export function createOpenClawGuardrailsPlugin(
 
   return {
     name: "openclaw-guardrails",
-    version: "0.5.0",
+    version: "0.5.1",
     approveRequest: (
       requestId: string,
       approverId: string,
@@ -500,10 +524,17 @@ export function createOpenClawGuardrailsPlugin(
       },
 
       async message_sending(context: OpenClawContext): Promise<OpenClawHookResult> {
-        const contentField = context.content ?? context.message ?? context.output ?? context.prompt ?? context.text;
+        const aggregated = extractOutboundContent(context);
+        const stringFields: Record<string, string> = {};
+        for (const [k, v] of Object.entries(context)) {
+          if (typeof v === "string" && v.length > 0) {
+            stringFields[k] = v.length > 120 ? v.slice(0, 120) + "…" : v;
+          }
+        }
         console.log("[guardrails:message_sending] hook fired", {
-          hasContent: Boolean(contentField),
-          contentPreview: typeof contentField === "string" ? contentField.slice(0, 120) : undefined,
+          aggregatedLength: aggregated.length,
+          aggregatedPreview: aggregated.slice(0, 200),
+          stringFields,
           contextKeys: Object.keys(context)
         });
 

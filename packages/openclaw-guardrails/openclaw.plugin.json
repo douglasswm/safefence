@@ -1,7 +1,7 @@
 {
   "id": "openclaw-guardrails",
   "name": "openclaw-guardrails",
-  "version": "0.4.0",
+  "version": "0.5.1",
   "description": "Deterministic local guardrails for OpenClaw hooks",
   "entry": "dist/plugin/openclaw-extension.js",
   "configSchema": {
@@ -122,13 +122,27 @@
               "# system prompt",
               "begin system prompt",
               "here is my system prompt",
-              "here are my instructions"
+              "here are my instructions",
+              ".openclaw",
+              "heartbeat.md",
+              "bootstrap.md",
+              "identity.md"
             ]
           },
           "injectedFileNames": {
             "type": "array",
             "items": { "type": "string" },
-            "default": ["agents.md", "soul.md"]
+            "default": [
+              "agents.md",
+              "soul.md",
+              "bootstrap.md",
+              "heartbeat.md",
+              "identity.md",
+              "tools.md",
+              "user.md",
+              ".openclaw/",
+              ".openclaw"
+            ]
           }
         }
       },
