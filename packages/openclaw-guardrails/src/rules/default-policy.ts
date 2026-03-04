@@ -135,11 +135,22 @@ export function createDefaultConfig(workspaceRoot: string): GuardrailsConfig {
         "# system prompt",
         "begin system prompt",
         "here is my system prompt",
-        "here are my instructions"
+        "here are my instructions",
+        ".openclaw",
+        "heartbeat.md",
+        "bootstrap.md",
+        "identity.md"
       ],
       injectedFileNames: [
         "agents.md",
-        "soul.md"
+        "soul.md",
+        "bootstrap.md",
+        "heartbeat.md",
+        "identity.md",
+        "tools.md",
+        "user.md",
+        ".openclaw/",
+        ".openclaw"
       ]
     },
     rollout: {

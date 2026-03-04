@@ -4,6 +4,57 @@ import { safeStringify, truncate } from "../event-utils.js";
 import type { RuleHit } from "../types.js";
 import type { DetectorContext } from "./types.js";
 
+const CONTEXT_PROBE_PATTERNS = [
+  "list.*(?:your|the).*files",
+  "what.*files.*(?:do you|are|have)",
+  "show.*(?:your|the).*(?:workspace|directory|folder|context)",
+  "what(?:'s| is).*(?:in )?your.*(?:workspace|directory|folder|context)",
+  "(?:print|show|read|output|display|reveal|dump|give).*\\b(?:agents|soul|bootstrap|identity|heartbeat|tools|user)\\.md\\b",
+  "(?:what|which).*(?:md|markdown).*files"
+];
+
+function detectContextProbe(
+  text: string,
+  context: DetectorContext
+): RuleHit | null {
+  const { config } = context;
+
+  if (!config.outboundGuard.enabled) {
+    return null;
+  }
+
+  const lower = text.toLowerCase();
+
+  // Check if message references injected file names directly
+  const fileNames = config.outboundGuard.injectedFileNames;
+  const mentionsInjectedFile = fileNames.some((f) => lower.includes(f.toLowerCase()));
+
+  if (mentionsInjectedFile) {
+    return {
+      ruleId: "input.context_probe.file_reference",
+      reasonCode: REASON_CODES.SYSTEM_PROMPT_LEAK,
+      decision: "DENY",
+      weight: 0.9
+    };
+  }
+
+  // Check for workspace/context probing patterns
+  const hasProbePattern = CONTEXT_PROBE_PATTERNS.some((pattern) =>
+    new RegExp(pattern, "i").test(lower)
+  );
+
+  if (hasProbePattern) {
+    return {
+      ruleId: "input.context_probe.pattern",
+      reasonCode: REASON_CODES.SYSTEM_PROMPT_LEAK,
+      decision: "DENY",
+      weight: 0.85
+    };
+  }
+
+  return null;
+}
+
 export function detectInputIntent(context: DetectorContext): RuleHit[] {
   const { event, config } = context;
   const hits: RuleHit[] = [];
@@ -62,6 +113,14 @@ export function detectInputIntent(context: DetectorContext): RuleHit[] {
       decision: "DENY",
       weight: 0.85
     });
+  }
+
+  // Detect requests probing for injected context / file names
+  if (event.phase === "message_received") {
+    const probeHit = detectContextProbe(text, context);
+    if (probeHit) {
+      hits.push(probeHit);
+    }
   }
 
   return hits;

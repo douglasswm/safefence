@@ -56,12 +56,13 @@ export function detectOutputSafety(
     return { hits: [] };
   }
 
-  // For message_sending phase, check system prompt leak patterns
-  if (event.phase === "message_sending") {
-    return detectSystemPromptLeak(content, context);
+  // Check system prompt leak patterns on all output phases
+  const leakResult = detectSystemPromptLeak(content, context);
+  if (leakResult.hits.length > 0) {
+    return leakResult;
   }
 
-  // Existing tool_result_persist / message_received sanitization
+  // Existing sanitization for suspicious patterns
   const suspiciousPatterns = [
     "<script",
     "begin system prompt",
