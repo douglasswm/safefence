@@ -1,7 +1,7 @@
 {
   "id": "openclaw-guardrails",
   "name": "openclaw-guardrails",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Deterministic local guardrails for OpenClaw hooks",
   "entry": "dist/plugin/openclaw-extension.js",
   "configSchema": {
@@ -108,6 +108,30 @@
           }
         }
       },
+      "outboundGuard": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "systemPromptLeakPatterns": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": [
+              "security policy (immutable)",
+              "immutable security policy",
+              "# system prompt",
+              "begin system prompt",
+              "here is my system prompt",
+              "here are my instructions"
+            ]
+          },
+          "injectedFileNames": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": ["agents.md", "soul.md"]
+          }
+        }
+      },
       "rollout": {
         "type": "object",
         "additionalProperties": false,
@@ -142,6 +166,7 @@
     "message_received",
     "before_tool_call",
     "tool_result_persist",
+    "message_sending",
     "agent_end"
   ]
 }
