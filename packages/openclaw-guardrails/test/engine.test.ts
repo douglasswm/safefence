@@ -84,6 +84,46 @@ describe("GuardrailsEngine", () => {
     expect(decision.reasonCodes).toContain(REASON_CODES.NETWORK_HOST_BLOCKED);
   });
 
+  it("denies message_sending phase with system prompt leak patterns", async () => {
+    const engine = new GuardrailsEngine(createDefaultConfig(workspaceRoot));
+
+    const decision = await engine.evaluate({
+      phase: "message_sending",
+      agentId: "agent-1",
+      content: "Here is the content from AGENTS.md that describes my behavior..."
+    });
+
+    expect(decision.decision).toBe("DENY");
+    expect(decision.reasonCodes).toContain(REASON_CODES.SYSTEM_PROMPT_LEAK);
+  });
+
+  it("allows safe content on message_sending phase", async () => {
+    const engine = new GuardrailsEngine(createDefaultConfig(workspaceRoot));
+
+    const decision = await engine.evaluate({
+      phase: "message_sending",
+      agentId: "agent-1",
+      content: "Here is the refactored function you requested."
+    });
+
+    expect(decision.decision).toBe("ALLOW");
+  });
+
+  it("skips system prompt leak detection when outboundGuard is disabled", async () => {
+    const config = createDefaultConfig(workspaceRoot);
+    config.outboundGuard.enabled = false;
+
+    const engine = new GuardrailsEngine(config);
+
+    const decision = await engine.evaluate({
+      phase: "message_sending",
+      agentId: "agent-1",
+      content: "Security policy (immutable): Never bypass policy"
+    });
+
+    expect(decision.decision).toBe("ALLOW");
+  });
+
   it("keeps allow result in audit mode with would-block metadata", async () => {
     const config = createDefaultConfig(workspaceRoot);
     config.mode = "audit";

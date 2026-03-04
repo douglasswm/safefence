@@ -25,7 +25,8 @@ export function detectRestrictedInfo(context: DetectorContext): DetectorResult {
 
   if (
     event.phase !== "message_received" &&
-    event.phase !== "tool_result_persist"
+    event.phase !== "tool_result_persist" &&
+    event.phase !== "message_sending"
   ) {
     return { hits: [] };
   }
@@ -43,7 +44,10 @@ export function detectRestrictedInfo(context: DetectorContext): DetectorResult {
     };
   }
 
-  const replacement = `[REDACTED:${dataClass.toUpperCase()}]`;
+  const base = config.redaction.replacement;
+  const replacement = base.endsWith("]")
+    ? `${base.slice(0, -1)}:${dataClass.toUpperCase()}]`
+    : `${base}:${dataClass.toUpperCase()}`;
   const redactedContent = event.content ? replacement : undefined;
 
   return {

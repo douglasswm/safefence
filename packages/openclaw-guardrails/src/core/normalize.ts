@@ -47,6 +47,7 @@ function pickPhase(input: Record<string, unknown>, fallback: Phase): Phase {
     case "message_received":
     case "before_tool_call":
     case "tool_result_persist":
+    case "message_sending":
     case "agent_end":
       return phase;
     default:

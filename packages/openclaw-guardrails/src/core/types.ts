@@ -3,10 +3,12 @@ export type Phase =
   | "message_received"
   | "before_tool_call"
   | "tool_result_persist"
+  | "message_sending"
   | "agent_end";
 
 export type Decision = "ALLOW" | "REDACT" | "DENY";
 export type PrincipalRole = "owner" | "admin" | "member" | "unknown";
+export type ApproverRole = Extract<PrincipalRole, "owner" | "admin">;
 export type ChannelType = "dm" | "group" | "thread" | "unknown";
 export type DataClass = "public" | "internal" | "restricted" | "secret";
 
@@ -118,6 +120,11 @@ export interface GuardrailsConfig {
     budgetKeyMode: "agent" | "agent+principal+conversation";
     redactCrossPrincipalOutput: boolean;
   };
+  outboundGuard: {
+    enabled: boolean;
+    systemPromptLeakPatterns: string[];
+    injectedFileNames: string[];
+  };
   rollout: {
     stage: RolloutStage;
     highRiskTools: string[];
@@ -146,7 +153,7 @@ export interface GuardDecision {
     requestId: string;
     expiresAt: number;
     reason: string;
-    requiredRole: "owner" | "admin";
+    requiredRole: ApproverRole;
   };
   telemetry: {
     matchedRules: string[];

@@ -127,6 +127,21 @@ export function createDefaultConfig(workspaceRoot: string): GuardrailsConfig {
       budgetKeyMode: "agent+principal+conversation",
       redactCrossPrincipalOutput: true
     },
+    outboundGuard: {
+      enabled: true,
+      systemPromptLeakPatterns: [
+        "security policy (immutable)",
+        "immutable security policy",
+        "# system prompt",
+        "begin system prompt",
+        "here is my system prompt",
+        "here are my instructions"
+      ],
+      injectedFileNames: [
+        "agents.md",
+        "soul.md"
+      ]
+    },
     rollout: {
       stage: "stage_c_full_enforce",
       highRiskTools: defaultRestrictedTools
@@ -207,6 +222,10 @@ export function mergeConfig(
     tenancy: {
       ...base.tenancy,
       ...(overrides.tenancy ?? {})
+    },
+    outboundGuard: {
+      ...base.outboundGuard,
+      ...(overrides.outboundGuard ?? {})
     },
     rollout: {
       ...base.rollout,

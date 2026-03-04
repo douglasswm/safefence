@@ -73,6 +73,7 @@ describe("distribution contract", () => {
       "message_received",
       "before_tool_call",
       "tool_result_persist",
+      "message_sending",
       "agent_end"
     ]);
 

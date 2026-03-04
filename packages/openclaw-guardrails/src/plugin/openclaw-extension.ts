@@ -1,3 +1,4 @@
+import { isObject, asRecord } from "../core/event-utils.js";
 import type { GuardrailsConfig } from "../core/types.js";
 import {
   createOpenClawGuardrailsPlugin,
@@ -24,21 +25,7 @@ interface OpenClawPluginApi {
   };
 }
 
-type UnknownRecord = Record<string, unknown>;
-
-function isRecord(value: unknown): value is UnknownRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function toContext(value: unknown): OpenClawContext {
-  if (isRecord(value)) {
-    return value as OpenClawContext;
-  }
-
-  return {};
-}
-
-function isGuardrailsConfig(value: UnknownRecord): boolean {
+function isGuardrailsConfig(value: Record<string, unknown>): boolean {
   const knownKeys = [
     "mode",
     "failClosed",
@@ -54,6 +41,7 @@ function isGuardrailsConfig(value: UnknownRecord): boolean {
     "authorization",
     "approval",
     "tenancy",
+    "outboundGuard",
     "rollout",
     "monitoring"
   ];
@@ -62,16 +50,16 @@ function isGuardrailsConfig(value: UnknownRecord): boolean {
 }
 
 function getPluginConfig(rawConfig: unknown): Partial<GuardrailsConfig> {
-  if (!isRecord(rawConfig)) {
+  if (!isObject(rawConfig)) {
     return {};
   }
 
   const plugins = rawConfig.plugins;
-  if (isRecord(plugins)) {
+  if (isObject(plugins)) {
     const entries = plugins.entries;
-    if (isRecord(entries)) {
+    if (isObject(entries)) {
       const entry = entries[PLUGIN_ID];
-      if (isRecord(entry) && isRecord(entry.config)) {
+      if (isObject(entry) && isObject(entry.config)) {
         return entry.config as Partial<GuardrailsConfig>;
       }
     }
@@ -90,7 +78,7 @@ function registerHook(
   handler: (context: OpenClawContext) => Promise<OpenClawHookResult>,
   description: string
 ): void {
-  api.registerHook?.(hookName, (context: unknown) => handler(toContext(context)), {
+  api.registerHook?.(hookName, (context: unknown) => handler(asRecord(context) as OpenClawContext), {
     name: `${PLUGIN_ID}.${hookName}`,
     description
   });
@@ -127,6 +115,12 @@ export function registerOpenClawGuardrails(api: OpenClawPluginApi): void {
     "tool_result_persist",
     plugin.hooks.tool_result_persist,
     "Sanitize tool output before persistence."
+  );
+  registerHook(
+    api,
+    "message_sending",
+    plugin.hooks.message_sending,
+    "Gate outbound agent responses for system prompt leaks and sensitive data."
   );
   registerHook(
     api,
