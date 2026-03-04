@@ -19,6 +19,7 @@ import { normalizeGuardEvent } from "./normalize.js";
 import { REASON_CODES } from "./reason-codes.js";
 import { aggregateRisk } from "./scoring.js";
 import type {
+  ApproverRole,
   Decision,
   GuardDecision,
   GuardEvent,
@@ -54,7 +55,7 @@ export class GuardrailsEngine {
   approveRequest(
     requestId: string,
     approverId: string,
-    approverRole: "owner" | "admin"
+    approverRole: ApproverRole
   ): string | null {
     return this.approvalBroker.approveRequest(requestId, approverId, approverRole);
   }

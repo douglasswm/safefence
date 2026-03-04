@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { ApprovalRequirement } from "./detectors/types.js";
 import { ApprovalStore, type ApprovalRecord } from "./approval-store.js";
+import { UNKNOWN_SENDER, UNKNOWN_CONVERSATION } from "./identity.js";
 import type { GuardDecision, GuardrailsConfig, NormalizedEvent, PrincipalRole } from "./types.js";
 
 export type ApprovalVerifyResult = "valid" | "invalid" | "expired" | "replayed";
@@ -12,18 +13,16 @@ export interface ApprovalChallengeInput {
 }
 
 function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
-  }
-
-  const object = value as Record<string, unknown>;
-  const keys = Object.keys(object).sort();
-  const entries = keys.map((key) => `"${key}":${stableStringify(object[key])}`);
-  return `{${entries.join(",")}}`;
+  return JSON.stringify(value, (_key, v) => {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const sorted: Record<string, unknown> = {};
+      for (const k of Object.keys(v).sort()) {
+        sorted[k] = (v as Record<string, unknown>)[k];
+      }
+      return sorted;
+    }
+    return v;
+  });
 }
 
 export function buildApprovalActionDigest(event: NormalizedEvent): string {
@@ -32,8 +31,8 @@ export function buildApprovalActionDigest(event: NormalizedEvent): string {
     toolName: event.toolName ?? "",
     args: event.args ?? {},
     dataClass: event.metadata.dataClass ?? "public",
-    conversationId: principal?.conversationId ?? "unknown-conversation",
-    requesterId: principal?.senderId ?? "unknown-sender"
+    conversationId: principal?.conversationId ?? UNKNOWN_CONVERSATION,
+    requesterId: principal?.senderId ?? UNKNOWN_SENDER
   });
   return crypto.createHash("sha256").update(canonical).digest("hex");
 }
@@ -52,7 +51,7 @@ export class ApprovalBroker {
     private readonly config: GuardrailsConfig,
     store?: ApprovalStore
   ) {
-    this.store = store ?? new ApprovalStore(config.approval.storagePath);
+    this.store = store ?? new ApprovalStore(config.approval.storagePath, config.workspaceRoot);
   }
 
   createChallenge({
@@ -64,8 +63,8 @@ export class ApprovalBroker {
     const requestId = crypto.randomUUID();
     const expiresAt = nowMs + this.config.approval.ttlSeconds * 1_000;
     const actionDigest = buildApprovalActionDigest(event);
-    const conversationId = principal?.conversationId ?? "unknown-conversation";
-    const requesterId = principal?.senderId ?? "unknown-sender";
+    const conversationId = principal?.conversationId ?? UNKNOWN_CONVERSATION;
+    const requesterId = principal?.senderId ?? UNKNOWN_SENDER;
 
     const record: ApprovalRecord = {
       requestId,
@@ -127,14 +126,10 @@ export class ApprovalBroker {
     }
 
     if (record.token) {
-      return record.token;
+      return record.usedAt ? null : record.token;
     }
 
     const token = `apr_${crypto.randomUUID().replace(/-/g, "")}`;
-    this.store.save({
-      ...record,
-      approverIds
-    });
     this.store.setToken(requestId, token, approverIds.join(","));
     return token;
   }
@@ -163,14 +158,14 @@ export class ApprovalBroker {
     }
 
     const principal = event.metadata.principal;
-    const requesterId = principal?.senderId ?? "unknown-sender";
+    const requesterId = principal?.senderId ?? UNKNOWN_SENDER;
     if (record.requesterId !== requesterId) {
       return "invalid";
     }
 
     if (
       this.config.approval.bindToConversation &&
-      record.conversationId !== (principal?.conversationId ?? "unknown-conversation")
+      record.conversationId !== (principal?.conversationId ?? UNKNOWN_CONVERSATION)
     ) {
       return "invalid";
     }

@@ -119,7 +119,7 @@ describe("owner approval", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-approval-"));
     const storagePath = path.join(tempDir, "approval-store.json");
 
-    const config = createDefaultConfig("/workspace/project");
+    const config = createDefaultConfig(tempDir);
     config.approval.storagePath = storagePath;
 
     const firstEngine = new GuardrailsEngine(config);

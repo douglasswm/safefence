@@ -27,7 +27,14 @@ export class BudgetStore {
     }
 
     bucket.push(nowMs);
-    return bucket.length > limitPerMinute;
+    const exceeded = bucket.length > limitPerMinute;
+
+    // Prune empty entries to prevent unbounded Map growth from high-cardinality keys.
+    if (budget.requests.length === 0 && budget.toolCalls.length === 0) {
+      this.perKey.delete(subjectKey);
+    }
+
+    return exceeded;
   }
 
   private getOrCreateAgentBudget(subjectKey: string): AgentBudget {

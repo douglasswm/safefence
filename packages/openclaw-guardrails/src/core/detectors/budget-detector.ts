@@ -1,4 +1,5 @@
 import { BudgetStore } from "../budget-store.js";
+import { UNKNOWN_SENDER, UNKNOWN_CONVERSATION } from "../identity.js";
 import { REASON_CODES } from "../reason-codes.js";
 import type { RuleHit } from "../types.js";
 import type { DetectorContext } from "./types.js";
@@ -10,8 +11,8 @@ function toBudgetKey(context: DetectorContext): string {
   }
 
   const principal = event.metadata.principal;
-  const conversationId = principal?.conversationId ?? "unknown-conversation";
-  const senderId = principal?.senderId ?? "unknown-sender";
+  const conversationId = principal?.conversationId ?? UNKNOWN_CONVERSATION;
+  const senderId = principal?.senderId ?? UNKNOWN_SENDER;
   return `${event.agentId}|${conversationId}|${senderId}`;
 }
 

@@ -6,6 +6,9 @@ import type {
   PrincipalRole
 } from "./types.js";
 
+export const UNKNOWN_SENDER = "unknown-sender";
+export const UNKNOWN_CONVERSATION = "unknown-conversation";
+
 export interface PrincipalResolution {
   principal: PrincipalContext;
   missingContext: boolean;
@@ -53,10 +56,9 @@ function inferRole(
   explicitRole: PrincipalRole | undefined,
   config: GuardrailsConfig
 ): PrincipalRole {
-  if (explicitRole && explicitRole !== "unknown") {
-    return explicitRole;
-  }
-
+  // Privileged roles (owner/admin) MUST be derived from the trusted config
+  // id-lists, never from caller-supplied metadata. This prevents role spoofing
+  // where an attacker sets metadata.role = "owner" to bypass guardrails.
   if (!senderId) {
     return "unknown";
   }
@@ -69,7 +71,13 @@ function inferRole(
     return "admin";
   }
 
-  return explicitRole ?? "member";
+  // Caller-supplied role is only trusted for non-privileged values.
+  // "owner" and "admin" from metadata are downgraded to "member".
+  if (explicitRole && explicitRole !== "unknown" && explicitRole !== "owner" && explicitRole !== "admin") {
+    return explicitRole;
+  }
+
+  return "member";
 }
 
 function pickSenderId(metadata: GuardMetadata): string | undefined {
@@ -88,7 +96,7 @@ function pickConversationId(metadata: GuardMetadata): string {
     asString(metadata.conversationId) ??
     asString(metadata.sessionKey) ??
     asString(metadata.channelId) ??
-    "unknown-conversation"
+    UNKNOWN_CONVERSATION
   );
 }
 
@@ -117,7 +125,7 @@ export function resolvePrincipalContext(
     asString(metadata.principal?.channelId) ?? asString(metadata.channelId);
 
   const principal: PrincipalContext = {
-    senderId: senderId ?? "unknown-sender",
+    senderId: senderId ?? UNKNOWN_SENDER,
     senderHandle,
     role,
     channelId,
@@ -128,10 +136,11 @@ export function resolvePrincipalContext(
   };
 
   const hasAnyIdentitySignal =
-    Boolean(metadata.principal) ||
+    Boolean(metadata.principal?.senderId) ||
     Boolean(asString(metadata.senderId)) ||
     Boolean(asString(metadata.userId)) ||
-    Boolean(asString(metadata.fromId));
+    Boolean(asString(metadata.fromId)) ||
+    Boolean(asString(metadata.actorId));
 
   return {
     principal,

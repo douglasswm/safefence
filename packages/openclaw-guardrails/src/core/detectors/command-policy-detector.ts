@@ -57,13 +57,23 @@ export function detectCommandPolicy(context: DetectorContext): RuleHit[] {
   }
 
   if (allowedBinary?.argPattern) {
-    const regex = new RegExp(allowedBinary.argPattern, "u");
-    if (!regex.test(parsed.args.trim())) {
+    try {
+      const regex = new RegExp(allowedBinary.argPattern, "u");
+      if (!regex.test(parsed.args.trim())) {
+        hits.push({
+          ruleId: "command.args.pattern",
+          reasonCode: REASON_CODES.COMMAND_ARG_PATTERN_BLOCKED,
+          decision: "DENY",
+          weight: 0.8
+        });
+      }
+    } catch {
+      // Malformed pattern — fail closed to prevent bypass.
       hits.push({
-        ruleId: "command.args.pattern",
+        ruleId: "command.args.pattern.invalid",
         reasonCode: REASON_CODES.COMMAND_ARG_PATTERN_BLOCKED,
         decision: "DENY",
-        weight: 0.8
+        weight: 0.9
       });
     }
   }

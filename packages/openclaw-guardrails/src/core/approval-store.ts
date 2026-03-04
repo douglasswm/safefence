@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { ApproverRole } from "./types.js";
 
 export interface ApprovalRecord {
   requestId: string;
   actionDigest: string;
   requesterId: string;
   conversationId: string;
-  requiredRole: "owner" | "admin";
+  requiredRole: ApproverRole;
   reason: string;
   createdAt: number;
   expiresAt: number;
@@ -21,7 +22,14 @@ export class ApprovalStore {
   private readonly requestIdByToken = new Map<string, string>();
   private readonly storagePath?: string;
 
-  constructor(storagePath?: string) {
+  constructor(storagePath?: string, allowedRoot?: string) {
+    if (storagePath && allowedRoot) {
+      const resolved = path.resolve(storagePath);
+      const resolvedRoot = path.resolve(allowedRoot);
+      if (!resolved.startsWith(resolvedRoot + path.sep) && resolved !== resolvedRoot) {
+        throw new Error(`storagePath must be within ${resolvedRoot}`);
+      }
+    }
     this.storagePath = storagePath;
     this.loadFromDisk();
   }
@@ -77,8 +85,22 @@ export class ApprovalStore {
       usedAt
     };
     this.byRequestId.set(requestId, updated);
+    this.pruneExpired(usedAt);
     this.flushToDisk();
     return updated;
+  }
+
+  private pruneExpired(nowMs: number): void {
+    for (const [id, record] of this.byRequestId) {
+      // Only prune records that are both expired AND used (or expired without a token).
+      // Used-but-not-expired records must be retained for replay detection.
+      if (record.expiresAt <= nowMs) {
+        if (record.token) {
+          this.requestIdByToken.delete(record.token);
+        }
+        this.byRequestId.delete(id);
+      }
+    }
   }
 
   private loadFromDisk(): void {
@@ -87,10 +109,6 @@ export class ApprovalStore {
     }
 
     try {
-      if (!fs.existsSync(this.storagePath)) {
-        return;
-      }
-
       const raw = fs.readFileSync(this.storagePath, "utf8");
       const parsed = JSON.parse(raw) as ApprovalRecord[];
 

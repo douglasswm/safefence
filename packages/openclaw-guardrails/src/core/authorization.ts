@@ -107,7 +107,6 @@ export function evaluateAuthorization(
       const needsApproval =
         config.approval.enabled &&
         config.approval.requireForTools.includes(toolName) &&
-        principal.channelType === "group" &&
         principal.role !== "owner";
 
       if (needsApproval) {
@@ -132,7 +131,6 @@ export function evaluateAuthorization(
       const needsApproval =
         config.approval.enabled &&
         dataClassNeedsApproval(dataClass, config) &&
-        principal.channelType === "group" &&
         principal.role !== "owner";
 
       if (needsApproval && !approvalRequirement) {

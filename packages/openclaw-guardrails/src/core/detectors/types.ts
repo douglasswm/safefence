@@ -1,4 +1,5 @@
 import type {
+  ApproverRole,
   GuardDecision,
   GuardrailsConfig,
   NormalizedEvent,
@@ -8,7 +9,7 @@ import type {
 
 export interface ApprovalRequirement {
   reason: string;
-  requiredRole: "owner" | "admin";
+  requiredRole: ApproverRole;
 }
 
 export interface DetectorResult {
