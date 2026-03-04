@@ -32,67 +32,28 @@ npm run build
 
 ## Publish the OpenClaw Plugin (npm)
 
-Use this runbook to publish `@safefence/openclaw-guardrails` so it can be installed with `openclaw plugins install <npm-spec>`.
-
-### 1) Pre-publish checklist
-
 ```bash
 cd packages/openclaw-guardrails
-npm whoami
-npm test
-npm run build
+
+# Pre-publish
+npm whoami && npm test && npm run build
 npm pack --dry-run --cache ./.npm-cache
-```
 
-Validate packaging contract before publishing:
-
-- `package.json` includes `openclaw.extensions` pointing to the built plugin entry (`./dist/plugin/openclaw-extension.js`).
-- `openclaw.plugin.json` includes `id` and `configSchema`.
-- Tarball output includes `dist/**`, `openclaw.plugin.json`, and `README.md`.
-
-### 2) Publish to npm
-
-```bash
-cd packages/openclaw-guardrails
+# Publish (use --tag beta for prereleases)
 npm publish --access public
-```
 
-For prereleases:
-
-```bash
-npm publish --tag beta --access public
-```
-
-### 3) Validate published install path in OpenClaw
-
-```bash
+# Verify
 npm view @safefence/openclaw-guardrails version
 openclaw plugins install @safefence/openclaw-guardrails@<version>
 openclaw plugins list
-openclaw plugins info openclaw-guardrails
 ```
 
-Then restart Gateway/OpenClaw and confirm the plugin is configured under `plugins.entries.openclaw-guardrails`.
-
-Optional cleanup:
-
-```bash
-openclaw plugins uninstall openclaw-guardrails
-```
-
-### 4) Notes
-
-- OpenClaw npm plugin installs are registry specs only (package name + optional version/tag), not Git/URL specs.
-- OpenClaw installs plugin dependencies with `npm install --ignore-scripts`, so keep dependencies compatible with no lifecycle scripts.
-- If publishing from supported CI, use npm provenance (`npm publish --provenance`) for stronger supply-chain attestations.
+Ensure `package.json` has `openclaw.extensions` pointing to `./dist/plugin/openclaw-extension.js`, and the tarball includes `dist/**`, `openclaw.plugin.json`, and `README.md`.
 
 ## Documentation
 
 - Package docs: [`packages/openclaw-guardrails/README.md`](./packages/openclaw-guardrails/README.md)
 - Research report: [`docs/openclaw-llm-security-research.md`](./docs/openclaw-llm-security-research.md)
-- OpenClaw plugins docs: [`docs.openclaw.ai/tools/plugin`](https://docs.openclaw.ai/tools/plugin)
-- OpenClaw plugin CLI docs: [`docs.openclaw.ai/cli/plugins`](https://docs.openclaw.ai/cli/plugins)
-- npm publish docs: [`docs.npmjs.com/cli/v11/commands/npm-publish`](https://docs.npmjs.com/cli/v11/commands/npm-publish)
 
 ## Compatibility
 
