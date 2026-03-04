@@ -14,3 +14,4 @@ export type {
 } from "./core/types.js";
 export { createDefaultConfig, mergeConfig } from "./rules/default-policy.js";
 export { createOpenClawGuardrailsPlugin } from "./plugin/openclaw-adapter.js";
+export { registerOpenClawGuardrails } from "./plugin/openclaw-extension.js";

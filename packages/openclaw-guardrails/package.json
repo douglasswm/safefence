@@ -2,6 +2,9 @@
   "name": "@safefence/openclaw-guardrails",
   "version": "0.3.0",
   "description": "Native deterministic guardrails plugin for OpenClaw",
+  "openclaw": {
+    "extensions": ["./dist/plugin/openclaw-extension.js"]
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
