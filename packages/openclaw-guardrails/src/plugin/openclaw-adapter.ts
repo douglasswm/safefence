@@ -427,7 +427,7 @@ export function createOpenClawGuardrailsPlugin(
 
   return {
     name: "openclaw-guardrails",
-    version: "0.5.1",
+    version: "0.5.2",
     approveRequest: (
       requestId: string,
       approverId: string,
