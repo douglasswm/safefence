@@ -460,7 +460,7 @@ export function createOpenClawGuardrailsPlugin(
   const metrics = createMetrics();
 
   console.log("[guardrails] plugin created", {
-    version: "0.6.0",
+    version: "0.6.1",
     outboundGuardEnabled: config.outboundGuard.enabled,
     injectedFileNames: config.outboundGuard.injectedFileNames,
     mode: config.mode
@@ -478,7 +478,7 @@ export function createOpenClawGuardrailsPlugin(
 
   return {
     name: "openclaw-guardrails",
-    version: "0.6.0",
+    version: "0.6.1",
     approveRequest: (
       requestId: string,
       approverId: string,

@@ -101,8 +101,9 @@ src/
 │       ├── restricted-info-detector.ts   # Non-privileged group redaction
 │       └── sensitive-data-detector.ts    # Secret/PII detection
 ├── plugin/
-│   ├── openclaw-adapter.ts           # OpenClaw hook adapter + summary telemetry
-│   └── openclaw-extension.ts         # Plugin entry point (registerOpenClawGuardrails)
+│   ├── event-adapter.ts              # OpenClaw typed hook ↔ internal context mapping
+│   ├── openclaw-adapter.ts           # Core guardrails engine adapter + telemetry
+│   └── openclaw-extension.ts         # Plugin entry point (api.on() typed hooks)
 ├── redaction/
 │   └── redact.ts                     # Secret/PII redaction engine
 └── rules/
@@ -158,7 +159,13 @@ After changing plugin install/config, restart the OpenClaw service or gateway pr
 Three main entry points:
 
 ```ts
-// 1. Plugin factory — returns an OpenClaw-compatible plugin with hook handlers
+// 1. OpenClaw plugin — default export, auto-discovered by OpenClaw via
+//    package.json "openclaw.extensions". Registers all typed hooks via api.on().
+import { openclawGuardrailsPlugin } from "@safefence/openclaw-guardrails";
+// openclawGuardrailsPlugin.register(api) is called automatically by OpenClaw.
+
+// 2. Plugin factory — returns a guardrails engine with hook handlers,
+//    useful for testing or manual integration.
 import { createOpenClawGuardrailsPlugin } from "@safefence/openclaw-guardrails";
 
 const plugin = createOpenClawGuardrailsPlugin({
@@ -169,10 +176,6 @@ const plugin = createOpenClawGuardrailsPlugin({
 
 // Out-of-band owner approval
 const token = plugin.approveRequest(requestId, "owner-user-id", "owner");
-
-// 2. OpenClaw extension entry — auto-registers all hooks from plugin config
-import { registerOpenClawGuardrails } from "@safefence/openclaw-guardrails";
-registerOpenClawGuardrails(api);
 
 // 3. Engine directly — for custom integrations outside OpenClaw
 import { GuardrailsEngine } from "@safefence/openclaw-guardrails";
@@ -275,6 +278,15 @@ const plugin = createOpenClawGuardrailsPlugin({
 See the [research doc](../../docs/openclaw-llm-security-research.md) for a full config reference with all fields.
 
 ## Migration
+
+### v0.6.0 → v0.6.1
+
+1. **Plugin API alignment**: The plugin now uses OpenClaw's typed hook system (`api.on()`) instead of `api.registerHook()`. Security decisions (block, cancel, redact) are now properly honoured by OpenClaw's pipeline — previously they were silently discarded.
+2. **New event adapter layer**: `src/plugin/event-adapter.ts` bridges OpenClaw's structured `(event, ctx)` hook pairs to the internal `OpenClawContext`. No changes needed for users of `createOpenClawGuardrailsPlugin()` or `GuardrailsEngine` directly.
+3. **Plugin export**: The default export is now an `{ id, name, version, register }` object (compatible with `resolvePluginModuleExport()`). The `registerOpenClawGuardrails` named export is preserved for backward compatibility.
+4. **`tool_result_persist` sync redaction**: Uses the existing `redactWithPatterns()` utility for synchronous redaction. Full async engine evaluation runs fire-and-forget for audit/metrics.
+5. **Manifest cleaned**: Removed unrecognized `entry` and `hooks` fields from `openclaw.plugin.json`. Set `additionalProperties: false` on root config schema.
+6. **Peer dependency**: `openclaw` is now declared as a `peerDependency` (`>=2026.2.25`).
 
 ### v0.5.x → v0.6.0
 

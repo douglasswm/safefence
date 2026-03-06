@@ -38,7 +38,7 @@ describe("distribution contract", () => {
     const manifest = readJson("../openclaw.plugin.json") as Record<string, unknown>;
 
     expect(manifest.id).toBe("openclaw-guardrails");
-    expect(manifest.version).toBe("0.6.0");
+    expect(manifest.version).toBe("0.6.1");
     expect(manifest.configSchema).toBeDefined();
     expect(typeof manifest.configSchema).toBe("object");
 
@@ -74,7 +74,7 @@ describe("distribution contract", () => {
   it("exports a plugin definition with id, name, version, and register function", () => {
     expect(openclawGuardrailsPlugin.id).toBe("openclaw-guardrails");
     expect(openclawGuardrailsPlugin.name).toBe("OpenClaw Guardrails");
-    expect(openclawGuardrailsPlugin.version).toBe("0.6.0");
+    expect(openclawGuardrailsPlugin.version).toBe("0.6.1");
     expect(typeof openclawGuardrailsPlugin.register).toBe("function");
   });
 

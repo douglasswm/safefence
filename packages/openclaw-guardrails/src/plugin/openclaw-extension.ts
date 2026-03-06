@@ -89,7 +89,7 @@ interface PluginApi {
 const plugin = {
   id: "openclaw-guardrails",
   name: "OpenClaw Guardrails",
-  version: "0.6.0",
+  version: "0.6.1",
 
   register(api: PluginApi) {
     const rawConfig = (api.pluginConfig ?? {}) as Partial<GuardrailsConfig>;

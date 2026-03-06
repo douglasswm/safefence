@@ -13,7 +13,7 @@ Security-focused tooling for hardening OpenClaw agent deployments, with emphasis
 
 ## What This Project Delivers
 
-A deterministic security plugin for OpenClaw agents — no remote inference, zero runtime dependencies. Current version: `0.6.0`.
+A deterministic security plugin for OpenClaw agents — no remote inference, zero runtime dependencies. Current version: `0.6.1`.
 
 ### Detection Pipeline
 - Fixed-order detector pipeline (12 detectors): input intent (prompt injection, exfiltration, context probing), command policy, path canonicalization, network egress, supply chain provenance, principal authorization, owner approval, sensitive data, restricted-info redaction, output safety, budget enforcement, and external/custom validators.
@@ -35,7 +35,7 @@ A deterministic security plugin for OpenClaw agents — no remote inference, zer
 - Staged rollout (`stage_a_audit`, `stage_b_high_risk_enforce`, `stage_c_full_enforce`).
 - Runtime monitoring snapshot with false-positive threshold signaling.
 - Fail-closed by default.
-- 88 tests across 18 test files at ~85% line coverage.
+- 112 tests across 19 test files at ~85% line coverage.
 
 ## Quick Start (Current Package)
 
