@@ -29,6 +29,14 @@ Native TypeScript security kernel for OpenClaw (`>=2026.2.25`) with deterministi
 - Rollout controls (`stage_a_audit`, `stage_b_high_risk_enforce`, `stage_c_full_enforce`).
 - Monitoring snapshot with false-positive threshold signaling.
 
+## v0.6.0 Features
+
+- **Immutable JSONL audit trail**: every `evaluate()` call optionally emits a structured `AuditEvent` to a JSONL file via `AuditSink`. Atomic append, no runtime dependencies. Enable with `audit.enabled` + `audit.sinkPath`.
+- **Custom business rule validators**: inject domain-specific logic (spending limits, data access boundaries) via the `CustomValidator` interface without forking. Validators are phase-filtered and run concurrently with external validators.
+- **External validator integration**: optional HTTP-based semantic validation (jailbreak detection, PII scanning) via configurable endpoint. Circuit breaker (3 failures -> 60s cooldown), configurable timeout, fail-open mode. Zero new dependencies (native `fetch()`).
+- **Per-user token usage tracking**: records input/output token counts per user/conversation/tool via `TokenUsageStore`. JSONL persistence, per-user aggregation summaries emitted at `agent_end`.
+- **Admin notification bridge**: `NotificationSink` interface for cross-session admin notifications on approval challenges. Ships with `ConsoleNotificationSink`, `CallbackNotificationSink`, and `NoopNotificationSink`.
+
 ## Architecture
 
 ```
@@ -38,9 +46,14 @@ src/
 │   ├── engine.ts                     # Ordered detector pipeline + final decisioning
 │   ├── identity.ts                   # Principal normalization + anti-spoofing
 │   ├── authorization.ts              # Role/channel/data-class policy evaluation
-│   ├── approval.ts                   # Owner approval broker
+│   ├── approval.ts                   # Owner approval broker + notification sink
 │   ├── approval-store.ts             # Persistent approval state + pruning
+│   ├── audit-sink.ts                 # JSONL audit event sink
 │   ├── budget-store.ts               # Per-principal budget tracking
+│   ├── custom-validator.ts           # Custom validator interface
+│   ├── jsonl-writer.ts               # Shared JSONL append writer
+│   ├── notification-sink.ts          # Admin notification sink interface + impls
+│   ├── token-usage-store.ts          # Per-user token usage tracking
 │   ├── normalize.ts                  # Event normalization
 │   ├── event-utils.ts                # Guard event helpers
 │   ├── scoring.ts                    # Risk score aggregation
@@ -52,6 +65,7 @@ src/
 │   ├── retrieval-trust.ts            # Retrieval trust level evaluation
 │   ├── supply-chain.ts               # Skill source + hash policy
 │   └── detectors/                    # Security detector modules
+│       └── external-validator-detector.ts  # HTTP external validation + circuit breaker
 ├── plugin/
 │   ├── openclaw-adapter.ts           # OpenClaw hook adapter + summary telemetry
 │   └── openclaw-extension.ts         # Plugin entry point (registerOpenClawGuardrails)
@@ -70,6 +84,8 @@ src/
 4. Caller retries with `metadata.approval.token` (and optionally `requestId`).
 5. Engine verifies TTL, digest, conversation binding, requester identity binding, requestId (when provided), and replay status.
 6. Valid token allows reevaluation and execution.
+
+When `notifications.enabled` is true and a `NotificationSink` is configured, the broker automatically notifies admins when a new approval challenge is created.
 
 Approval works across all channel types (DM, group, thread), not just groups — group context merely triggers the initial challenge for restricted actions.
 
@@ -130,11 +146,79 @@ const engine = new GuardrailsEngine(config);
 const decision = await engine.evaluate(event);
 ```
 
-**Exported types**: `ApproverRole`, `ChannelType`, `DataClass`, `Decision`, `PrincipalContext`, `PrincipalRole`, `RolloutStage`, `GuardDecision`, `GuardEvent`, `GuardrailsConfig`, `Phase`.
+### Plugin with advanced options (v0.6.0)
+
+```ts
+import {
+  createOpenClawGuardrailsPlugin,
+  JsonlAuditSink,
+  CallbackNotificationSink
+} from "@safefence/openclaw-guardrails";
+
+const plugin = createOpenClawGuardrailsPlugin({
+  config: {
+    workspaceRoot: "/workspace/project",
+    audit: { enabled: true, sinkPath: "/var/log/guardrails/audit.jsonl" },
+    budgetPersistence: { enabled: true, storagePath: "/data/token-usage.jsonl" },
+    notifications: { enabled: true },
+    externalValidation: {
+      enabled: true,
+      endpoint: "https://guard.example.com/validate",
+      validators: ["jailbreak", "pii"],
+      timeoutMs: 3000,
+      failOpen: true
+    }
+  },
+  auditSink: new JsonlAuditSink("/var/log/guardrails/audit.jsonl"),
+  notificationSink: new CallbackNotificationSink(async (notification) => {
+    await sendSlackMessage(adminChannel, `Approval needed: ${notification.reason}`);
+  })
+});
+```
+
+### Custom validators (v0.6.0)
+
+```ts
+import { GuardrailsEngine } from "@safefence/openclaw-guardrails";
+import type { CustomValidator } from "@safefence/openclaw-guardrails";
+
+const spendingLimit: CustomValidator = {
+  id: "spending-limit",
+  phases: ["before_tool_call"],
+  validate({ event }) {
+    if (event.toolName === "purchase" && event.args.amount > 1000) {
+      return [{ ruleId: "spending-limit", reasonCode: "OVER_LIMIT", decision: "DENY", weight: 1 }];
+    }
+    return [];
+  }
+};
+
+const engine = new GuardrailsEngine(config, { customValidators: [spendingLimit] });
+```
+
+**Exported types**: `ApproverRole`, `ChannelType`, `DataClass`, `Decision`, `PrincipalContext`, `PrincipalRole`, `RolloutStage`, `GuardDecision`, `GuardEvent`, `GuardrailsConfig`, `Phase`, `TokenUsageSummary`, `AuditEvent`, `AuditSink`, `CustomValidator`, `CustomValidatorContext`, `NotificationSink`, `ApprovalNotification`, `TokenUsageRecord`, `EngineOptions`, `PluginOptions`.
 
 **Exported constants**: `REASON_CODES`, `UNKNOWN_SENDER`, `UNKNOWN_CONVERSATION`.
 
+**Exported classes**: `GuardrailsEngine`, `JsonlAuditSink`, `NoopAuditSink`, `ConsoleNotificationSink`, `CallbackNotificationSink`, `NoopNotificationSink`, `TokenUsageStore`.
+
 **Config helpers**: `createDefaultConfig()`, `mergeConfig(base, overrides)`.
+
+## Config Reference (v0.6.0 additions)
+
+| Section | Key | Type | Default | Description |
+|---------|-----|------|---------|-------------|
+| `audit` | `enabled` | `boolean` | `false` | Enable JSONL audit trail |
+| `audit` | `sinkPath` | `string?` | — | File path for JSONL audit events |
+| `externalValidation` | `enabled` | `boolean` | `false` | Enable HTTP external validators |
+| `externalValidation` | `endpoint` | `string` | — | POST endpoint for validation requests |
+| `externalValidation` | `timeoutMs` | `number?` | `5000` | Per-request timeout |
+| `externalValidation` | `validators` | `string[]` | `[]` | Validator names to invoke |
+| `externalValidation` | `failOpen` | `boolean` | `false` | Allow on timeout/error |
+| `budgetPersistence` | `enabled` | `boolean` | `false` | Enable token usage tracking |
+| `budgetPersistence` | `storagePath` | `string?` | — | JSONL path for usage persistence |
+| `notifications` | `enabled` | `boolean` | `false` | Enable approval notifications |
+| `notifications` | `adminChannelId` | `string?` | — | Target channel for notifications |
 
 ## Config Example (Minimal Overrides)
 
@@ -165,11 +249,20 @@ See the [research doc](../../docs/openclaw-llm-security-research.md) for a full 
 5. Use `rollout.stage` for staged deployment and monitor `metadata.guardrailsMonitoring`.
 6. **Breaking**: callers can no longer self-assign privileged roles (`owner`/`admin`) via `metadata.role`. Privileged roles are now derived exclusively from `principal.ownerIds`/`adminIds` in config. Any caller-supplied `"owner"` or `"admin"` role is downgraded to `"member"`.
 
+## Migration (v0.5.x -> v0.6.0)
+
+1. `GuardrailsEngine` constructor now takes `(config, options?)` instead of `(config, budgetStore?, approvalBroker?)`. Pass dependencies via `EngineOptions`.
+2. `createOpenClawGuardrailsPlugin()` accepts both `Partial<GuardrailsConfig>` (unchanged) and `PluginOptions` (new) for injecting audit sinks, notification sinks, etc.
+3. New config sections (`audit`, `externalValidation`, `budgetPersistence`, `notifications`) default to disabled — no breaking changes for existing configs.
+4. New reason codes: `EXTERNAL_VALIDATION_FAILED`, `EXTERNAL_VALIDATION_TIMEOUT`.
+
 ## Limitations
 
 - Deterministic patterns are not a full semantic jailbreak solution.
 - Persistent approval store prunes expired records on write; replayed tokens are still caught within the TTL window. Approval tokens survive restarts when `storagePath` is configured.
 - Retrieval trust still depends on upstream metadata quality.
+- External validator circuit breaker state is module-scoped (shared across engine instances in the same process).
+- Token usage `records` array grows unboundedly in memory for long-running processes. Use JSONL persistence and restart periodically for high-volume deployments.
 
 ## Development
 
