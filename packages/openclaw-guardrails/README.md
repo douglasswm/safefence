@@ -1,4 +1,4 @@
-# OpenClaw Guardrails v3
+# OpenClaw Guardrails
 
 > **Experimental** -- This project is under active development and not yet production-ready. APIs, config schemas, and behavior may change without notice between releases.
 
@@ -13,31 +13,46 @@ Native TypeScript security kernel for OpenClaw (`>=2026.2.25`) with deterministi
 ## Core Model
 
 - One engine path for all phases (`GuardrailsEngine`).
-- Declarative policy + deterministic reason codes.
+- Fixed-order detector pipeline with deterministic reason codes.
 - Monotonic precedence: `DENY > REDACT > ALLOW`.
 - No runtime dependency on remote inference or policy services.
+- Zero runtime dependencies — uses only Node.js built-ins (`fetch()`, `fs`).
 - Audit mode still applies redaction by default.
 
-## v3 Security Features
+## Security Features
 
+### Identity and Authorization
 - Principal-aware identity model (`owner/admin/member/unknown`).
 - **Anti-spoofing**: privileged roles (`owner`/`admin`) are derived exclusively from `principal.ownerIds`/`adminIds` in config — caller-supplied `metadata.role` values of `"owner"` or `"admin"` are downgraded to `"member"`.
-- Group-aware authorization (mention-gating + role tool policy).
+- Group-aware authorization (mention-gating + role-based tool policy).
+
+### Approval Workflow
 - One-time owner approval challenges with TTL, action digest binding, anti-replay, and requester identity binding.
 - Optional persistent approval store (`approval.storagePath`) with storage path validation (must be within `workspaceRoot`) and expired record pruning.
+- Admin notification bridge (`NotificationSink`) for cross-session approval alerts. Ships with `ConsoleNotificationSink`, `CallbackNotificationSink`, and `NoopNotificationSink`.
+
+### Detection Pipeline
+- Prompt injection pattern matching on inbound content.
+- Command allow/deny policy enforcement with shell operator blocking.
+- Path canonicalization with symlink traversal detection.
+- Network egress validation (host allowlist, private IP blocking).
+- Supply chain verification (skill source trust + hash integrity).
+- Sensitive data detection and redaction (secrets, PII) via regex patterns.
+- Output safety checks for system prompt leaks and injected filename references.
+- Restricted-info redaction for non-privileged group principals.
+
+### Operational Controls
 - **Reason code sanitization**: sensitive internal reason codes (e.g. `PROMPT_INJECTION`) are replaced with `CONTENT_POLICY_VIOLATION` in client-facing output to prevent detection fingerprinting.
 - Principal-partitioned budgets (`agent + principal + conversation`).
-- Restricted-info redaction for non-privileged group principals.
-- Rollout controls (`stage_a_audit`, `stage_b_high_risk_enforce`, `stage_c_full_enforce`).
+- Staged rollout controls (`stage_a_audit`, `stage_b_high_risk_enforce`, `stage_c_full_enforce`).
 - Monitoring snapshot with false-positive threshold signaling.
+- Fail-closed by default — engine errors result in `DENY` unless explicitly configured otherwise.
 
-## v0.6.0 Features
-
-- **Immutable JSONL audit trail**: every `evaluate()` call optionally emits a structured `AuditEvent` to a JSONL file via `AuditSink`. Atomic append, no runtime dependencies. Enable with `audit.enabled` + `audit.sinkPath`.
+### Extensibility
+- **Immutable JSONL audit trail**: every `evaluate()` call optionally emits a structured `AuditEvent` to a JSONL file via `AuditSink`. Enable with `audit.enabled` + `audit.sinkPath`.
 - **Custom business rule validators**: inject domain-specific logic (spending limits, data access boundaries) via the `CustomValidator` interface without forking. Validators are phase-filtered and run concurrently with external validators.
-- **External validator integration**: optional HTTP-based semantic validation (jailbreak detection, PII scanning) via configurable endpoint. Circuit breaker (3 failures -> 60s cooldown), configurable timeout, fail-open mode. Zero new dependencies (native `fetch()`).
+- **External validator integration**: optional HTTP-based semantic validation (jailbreak detection, PII scanning) via configurable endpoint. Circuit breaker (3 failures → 60s cooldown), configurable timeout, fail-open mode.
 - **Per-user token usage tracking**: records input/output token counts per user/conversation/tool via `TokenUsageStore`. JSONL persistence, per-user aggregation summaries emitted at `agent_end`.
-- **Admin notification bridge**: `NotificationSink` interface for cross-session admin notifications on approval challenges. Ships with `ConsoleNotificationSink`, `CallbackNotificationSink`, and `NoopNotificationSink`.
 
 ## Architecture
 
@@ -148,7 +163,7 @@ const engine = new GuardrailsEngine(config);
 const decision = await engine.evaluate(event);
 ```
 
-### Plugin with advanced options (v0.6.0)
+### Plugin with advanced options
 
 ```ts
 import {
@@ -178,7 +193,7 @@ const plugin = createOpenClawGuardrailsPlugin({
 });
 ```
 
-### Custom validators (v0.6.0)
+### Custom validators
 
 ```ts
 import { GuardrailsEngine } from "@safefence/openclaw-guardrails";
@@ -206,7 +221,7 @@ const engine = new GuardrailsEngine(config, { customValidators: [spendingLimit] 
 
 **Config helpers**: `createDefaultConfig()`, `mergeConfig(base, overrides)`.
 
-## Config Reference (v0.6.0 additions)
+## Config Reference
 
 | Section | Key | Type | Default | Description |
 |---------|-----|------|---------|-------------|
@@ -242,21 +257,23 @@ const plugin = createOpenClawGuardrailsPlugin({
 
 See the [research doc](../../docs/openclaw-llm-security-research.md) for a full config reference with all fields.
 
-## Migration (v2 -> v3)
+## Migration
 
-1. Add `principal`, `authorization`, `approval`, and `tenancy` blocks.
-2. Pass sender/channel metadata in hook contexts (`senderId`, `conversationId`, `channelType`, `mentionedAgent`).
-3. Integrate owner approval handling via `approvalChallenge.requestId` + `plugin.approveRequest(...)`.
-4. Keep secure defaults unless you have a validated exception.
-5. Use `rollout.stage` for staged deployment and monitor `metadata.guardrailsMonitoring`.
-6. **Breaking**: callers can no longer self-assign privileged roles (`owner`/`admin`) via `metadata.role`. Privileged roles are now derived exclusively from `principal.ownerIds`/`adminIds` in config. Any caller-supplied `"owner"` or `"admin"` role is downgraded to `"member"`.
-
-## Migration (v0.5.x -> v0.6.0)
+### v0.5.x → v0.6.0
 
 1. `GuardrailsEngine` constructor now takes `(config, options?)` instead of `(config, budgetStore?, approvalBroker?)`. Pass dependencies via `EngineOptions`.
 2. `createOpenClawGuardrailsPlugin()` accepts both `Partial<GuardrailsConfig>` (unchanged) and `PluginOptions` (new) for injecting audit sinks, notification sinks, etc.
 3. New config sections (`audit`, `externalValidation`, `budgetPersistence`, `notifications`) default to disabled — no breaking changes for existing configs.
 4. New reason codes: `EXTERNAL_VALIDATION_FAILED`, `EXTERNAL_VALIDATION_TIMEOUT`.
+
+### v0.3.x → v0.4.0
+
+1. Add `principal`, `authorization`, `approval`, and `tenancy` config blocks.
+2. Pass sender/channel metadata in hook contexts (`senderId`, `conversationId`, `channelType`, `mentionedAgent`).
+3. Integrate owner approval handling via `approvalChallenge.requestId` + `plugin.approveRequest(...)`.
+4. Keep secure defaults unless you have a validated exception.
+5. Use `rollout.stage` for staged deployment and monitor `metadata.guardrailsMonitoring`.
+6. **Breaking**: callers can no longer self-assign privileged roles (`owner`/`admin`) via `metadata.role`. Privileged roles are now derived exclusively from `principal.ownerIds`/`adminIds` in config. Any caller-supplied `"owner"` or `"admin"` role is downgraded to `"member"`.
 
 ## Limitations
 

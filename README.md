@@ -13,19 +13,28 @@ Security-focused tooling for hardening OpenClaw agent deployments, with emphasis
 
 ## What This Project Delivers
 
-The current implementation centers on `openclaw-guardrails` v0.6.0, including:
+A deterministic security plugin for OpenClaw agents — no remote inference, zero runtime dependencies. Current version: `0.6.0`.
 
-- deterministic security kernel with fixed evaluation order;
-- prompt injection, command, path, network, provenance, and output-safety detectors;
-- principal-aware authorization for group and multi-user contexts;
-- owner-approval workflow with TTL, anti-replay, conversation binding, and optional persistence;
-- immutable JSONL audit trail for every evaluation;
-- custom business rule validators for domain-specific logic;
-- optional external HTTP validators with circuit breaker (e.g. Guardrails AI);
-- per-user token usage tracking with JSONL persistence;
-- admin notification bridge for approval workflow alerts;
-- staged rollout controls (`stage_a_audit`, `stage_b_high_risk_enforce`, `stage_c_full_enforce`);
-- runtime monitoring snapshot with false-positive threshold signaling;
+### Detection Pipeline
+- Fixed-order detector pipeline: prompt injection, command policy, path canonicalization, network egress, supply chain provenance, sensitive data, output safety.
+- Monotonic precedence: `DENY > REDACT > ALLOW`.
+
+### Identity and Access Control
+- Principal-aware authorization (`owner/admin/member/unknown`) with anti-spoofing.
+- Group-aware mention-gating and role-based tool policy.
+- Owner-approval workflow with TTL, anti-replay, conversation binding, and optional persistence.
+- Admin notification bridge for approval workflow alerts.
+
+### Extensibility
+- Immutable JSONL audit trail for every evaluation.
+- Custom business rule validators for domain-specific logic.
+- Optional external HTTP validators with circuit breaker (e.g. Guardrails AI).
+- Per-user token usage tracking with JSONL persistence.
+
+### Operational Controls
+- Staged rollout (`stage_a_audit`, `stage_b_high_risk_enforce`, `stage_c_full_enforce`).
+- Runtime monitoring snapshot with false-positive threshold signaling.
+- Fail-closed by default.
 - 88 tests across 18 test files at 85% line coverage.
 
 ## Quick Start (Current Package)
