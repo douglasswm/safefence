@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type { ApprovalRequirement } from "./detectors/types.js";
 import { ApprovalStore, type ApprovalRecord } from "./approval-store.js";
 import { UNKNOWN_SENDER, UNKNOWN_CONVERSATION } from "./identity.js";
+import type { NotificationSink } from "./notification-sink.js";
 import type { GuardDecision, GuardrailsConfig, NormalizedEvent, PrincipalRole } from "./types.js";
 
 export type ApprovalVerifyResult = "valid" | "invalid" | "expired" | "replayed";
@@ -46,12 +47,15 @@ function canRoleApprove(requiredRole: "owner" | "admin", approverRole: Principal
 
 export class ApprovalBroker {
   private readonly store: ApprovalStore;
+  private readonly notificationSink: NotificationSink | undefined;
 
   constructor(
     private readonly config: GuardrailsConfig,
-    store?: ApprovalStore
+    store?: ApprovalStore,
+    notificationSink?: NotificationSink
   ) {
     this.store = store ?? new ApprovalStore(config.approval.storagePath, config.workspaceRoot);
+    this.notificationSink = notificationSink;
   }
 
   createChallenge({
@@ -79,6 +83,22 @@ export class ApprovalBroker {
     };
 
     this.store.save(record);
+
+    if (this.notificationSink && this.config.notifications.enabled) {
+      try {
+        void this.notificationSink.notify({
+          requestId,
+          requesterId,
+          toolName: event.toolName,
+          reason: requirement.reason,
+          requiredRole: requirement.requiredRole,
+          expiresAt,
+          conversationId
+        });
+      } catch {
+        // Notification failures must not break the approval flow
+      }
+    }
 
     return {
       requestId,

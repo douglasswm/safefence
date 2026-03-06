@@ -1,39 +1,43 @@
-# OpenClaw Guardrails Plugin Distribution + README Update
+# RBAC Research Implementation
 
-## Plan
+## Milestone 1: Immutable JSONL Audit Trail
+- [x] Create `src/core/audit-sink.ts`
+- [x] Add `audit` config to types.ts
+- [x] Wire AuditSink into engine.ts
+- [x] Add audit defaults to default-policy.ts + mergeConfig
+- [x] Instantiate sink in openclaw-adapter.ts
+- [x] Export from index.ts
+- [x] Create test/audit-sink.test.ts
 
-- [x] Confirm OpenClaw plugin distribution and manifest requirements from official docs.
-- [x] Add OpenClaw npm package metadata (`openclaw.extensions`) in package manifest.
-- [x] Add required plugin manifest identity (`id`) in `openclaw.plugin.json`.
-- [x] Add plugin runtime extension entrypoint with default export registration contract.
-- [x] Keep direct library API compatibility (`createOpenClawGuardrailsPlugin`).
-- [x] Update package README with npm install/config/verify/remove/test steps for OpenClaw.
-- [x] Add regression tests for distribution metadata and runtime hook registration contract.
-- [x] Run verification: `npm test`, `npm run build`, `npm pack --dry-run --cache ./.npm-cache`.
-- [x] Add review results with evidence.
+## Milestone 2: Custom Business Rule Validators
+- [x] Create `src/core/custom-validator.ts`
+- [x] Wire into engine.ts
+- [x] Export from index.ts
+- [x] Create test/custom-validator.test.ts
 
-## Review
+## Milestone 3: External Validator Integration
+- [x] Create `src/core/detectors/external-validator-detector.ts`
+- [x] Add config + reason codes to types.ts/reason-codes.ts
+- [x] Export from detectors/index.ts, wire into engine.ts
+- [x] Add defaults to default-policy.ts
+- [x] Create test/external-validator.test.ts
 
-- `npm test` passed: 13 files, 41 tests.
-- `npm run build` passed (`tsc -p tsconfig.json`).
-- `npm pack --dry-run --cache ./.npm-cache` passed and includes:
-  - `dist/plugin/openclaw-extension.js`
-  - `openclaw.plugin.json`
-  - updated package `README.md`
-- Local OpenClaw runtime validation remains manual in this workspace because `openclaw` CLI is not installed (`command not found`).
+## Milestone 4: Per-User Token Usage Tracking
+- [x] Create `src/core/token-usage-store.ts`
+- [x] Add config + types to types.ts
+- [x] Wire into engine.ts + openclaw-adapter.ts
+- [x] Add defaults to default-policy.ts
+- [x] Create test/token-usage.test.ts
 
----
+## Milestone 5: Admin Notification Bridge
+- [x] Create `src/core/notification-sink.ts`
+- [x] Add config to types.ts
+- [x] Wire into approval.ts + openclaw-adapter.ts
+- [x] Add defaults to default-policy.ts
+- [x] Export from index.ts
+- [x] Create test/notification-sink.test.ts
 
-# Root README Publish Runbook Update
-
-## Plan
-
-- [x] Research official OpenClaw npm plugin distribution and CLI behavior.
-- [x] Research official npm publish command guidance.
-- [x] Update root `README.md` with OpenClaw plugin publish runbook.
-- [x] Add source links in root documentation section.
-
-## Review
-
-- Added publish instructions to `/README.md` covering pre-publish checks, release/prerelease publish commands, and OpenClaw validation steps.
-- Included direct links to OpenClaw plugin docs, OpenClaw plugin CLI docs, and npm publish docs.
+## Verification
+- [x] `npx tsc --noEmit` -- no type errors
+- [x] `npx vitest run` -- 86 tests pass (18 files)
+- [x] `npx vitest run --coverage` -- 84.12% lines, 77.89% branches, 96.62% functions

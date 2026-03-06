@@ -160,6 +160,19 @@ export function createDefaultConfig(workspaceRoot: string): GuardrailsConfig {
     monitoring: {
       falsePositiveThresholdPct: 3,
       consecutiveDaysForTuning: 2
+    },
+    audit: {
+      enabled: false,
+      sinkPath: undefined
+    },
+    externalValidation: undefined,
+    budgetPersistence: {
+      enabled: false,
+      storagePath: undefined
+    },
+    notifications: {
+      enabled: false,
+      adminChannelId: undefined
     }
   };
 }
@@ -245,6 +258,20 @@ export function mergeConfig(
     monitoring: {
       ...base.monitoring,
       ...(overrides.monitoring ?? {})
+    },
+    audit: {
+      ...base.audit,
+      ...(overrides.audit ?? {})
+    },
+    externalValidation:
+      overrides.externalValidation ?? base.externalValidation,
+    budgetPersistence: {
+      ...base.budgetPersistence,
+      ...(overrides.budgetPersistence ?? {})
+    },
+    notifications: {
+      ...base.notifications,
+      ...(overrides.notifications ?? {})
     }
   };
 }

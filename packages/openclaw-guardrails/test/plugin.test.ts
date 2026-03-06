@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createOpenClawGuardrailsPlugin } from "../src/plugin/openclaw-adapter.js";
+import { CallbackNotificationSink } from "../src/core/notification-sink.js";
+import type { TokenUsageSummary } from "../src/core/types.js";
 
 describe("openclaw adapter", () => {
   it("injects immutable security prompt at agent start", async () => {
@@ -316,5 +321,78 @@ describe("openclaw adapter", () => {
     expect(monitoring).toBeDefined();
     expect(monitoring?.falsePositiveRatePct).toBeGreaterThan(1);
     expect(monitoring?.requiresPolicyTuning).toBe(true);
+  });
+
+  it("records token usage from tool_result_persist and emits summary at agent_end", async () => {
+    const plugin = createOpenClawGuardrailsPlugin({
+      config: {
+        workspaceRoot: "/workspace/project",
+        budgetPersistence: {
+          enabled: true
+          // no storagePath -> in-memory only
+        }
+      }
+    });
+
+    await plugin.hooks.tool_result_persist({
+      agentId: "agent-1",
+      toolName: "read",
+      senderId: "user-1",
+      conversationId: "conv-1",
+      content: "file contents",
+      metadata: {
+        inputTokens: 100,
+        outputTokens: 50
+      }
+    });
+
+    await plugin.hooks.tool_result_persist({
+      agentId: "agent-1",
+      toolName: "exec",
+      senderId: "user-2",
+      conversationId: "conv-1",
+      content: "exec output",
+      metadata: {
+        inputTokens: 200,
+        outputTokens: 100
+      }
+    });
+
+    const end = await plugin.hooks.agent_end({ agentId: "agent-1" });
+    const summary = end.metadata?.tokenUsageSummary as TokenUsageSummary | undefined;
+
+    expect(summary).toBeDefined();
+    expect(summary?.recordCount).toBe(2);
+    expect(summary?.totalInputTokens).toBe(300);
+    expect(summary?.totalOutputTokens).toBe(150);
+    expect(summary?.byUser["user-1"]?.total).toBe(150);
+    expect(summary?.byUser["user-2"]?.total).toBe(300);
+  });
+
+  it("writes audit events to JSONL sink when configured", async () => {
+    const auditPath = path.join(os.tmpdir(), `audit-plugin-${Date.now()}.jsonl`);
+    const plugin = createOpenClawGuardrailsPlugin({
+      config: {
+        workspaceRoot: "/workspace/project",
+        audit: {
+          enabled: true,
+          sinkPath: auditPath
+        }
+      }
+    });
+
+    await plugin.hooks.message_received({
+      agentId: "agent-1",
+      content: "safe message"
+    });
+
+    const lines = fs.readFileSync(auditPath, "utf-8").split("\n").filter(Boolean);
+    expect(lines.length).toBeGreaterThanOrEqual(1);
+    const event = JSON.parse(lines[0]);
+    expect(event.phase).toBe("message_received");
+    expect(event.agentId).toBe("agent-1");
+    expect(event.decision).toBeDefined();
+
+    try { fs.unlinkSync(auditPath); } catch { /* ignore */ }
   });
 });

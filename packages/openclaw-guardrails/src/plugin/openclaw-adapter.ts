@@ -1,6 +1,11 @@
+import { JsonlAuditSink, NoopAuditSink } from "../core/audit-sink.js";
+import type { AuditSink } from "../core/audit-sink.js";
 import { GuardrailsEngine } from "../core/engine.js";
 import { unique } from "../core/event-utils.js";
+import { ConsoleNotificationSink } from "../core/notification-sink.js";
+import type { NotificationSink } from "../core/notification-sink.js";
 import { REASON_CODES } from "../core/reason-codes.js";
+import { TokenUsageStore } from "../core/token-usage-store.js";
 import { createDefaultConfig, mergeConfig } from "../rules/default-policy.js";
 import type {
   ApproverRole,
@@ -407,13 +412,59 @@ function buildMonitoringSnapshot(config: GuardrailsConfig, metrics: Metrics) {
   };
 }
 
+export interface PluginOptions {
+  config?: Partial<GuardrailsConfig>;
+  auditSink?: AuditSink;
+  notificationSink?: NotificationSink;
+}
+
+function isPluginOptions(arg: unknown): arg is PluginOptions {
+  if (!arg || typeof arg !== "object") return false;
+  const obj = arg as Record<string, unknown>;
+  // PluginOptions has keys that never appear on GuardrailsConfig
+  return "auditSink" in obj || "notificationSink" in obj ||
+    ("config" in obj && (obj.config === undefined || (typeof obj.config === "object" && obj.config !== null)));
+}
+
 export function createOpenClawGuardrailsPlugin(
-  overrides: Partial<GuardrailsConfig> = {}
+  overridesOrOptions: Partial<GuardrailsConfig> | PluginOptions = {}
 ): OpenClawPlugin {
+  const pluginOpts = isPluginOptions(overridesOrOptions) ? overridesOrOptions : {};
+  const overrides: Partial<GuardrailsConfig> = isPluginOptions(overridesOrOptions)
+    ? overridesOrOptions.config ?? {}
+    : overridesOrOptions;
+
   const workspaceRoot = overrides.workspaceRoot ?? process.cwd();
   const config = mergeConfig(createDefaultConfig(workspaceRoot), overrides);
-  const engine = new GuardrailsEngine(config);
+
+  // Audit sink (M1)
+  const auditSink: AuditSink = pluginOpts.auditSink
+    ?? (config.audit.enabled && config.audit.sinkPath
+      ? new JsonlAuditSink(config.audit.sinkPath)
+      : new NoopAuditSink());
+
+  // Notification sink (M5)
+  const notificationSink: NotificationSink | undefined = pluginOpts.notificationSink
+    ?? (config.notifications.enabled ? new ConsoleNotificationSink() : undefined);
+
+  // Token usage store (M4)
+  const tokenUsageStore = config.budgetPersistence.enabled
+    ? new TokenUsageStore(config.budgetPersistence.storagePath)
+    : undefined;
+
+  const engine = new GuardrailsEngine(config, {
+    auditSink,
+    tokenUsageStore,
+    notificationSink
+  });
   const metrics = createMetrics();
+
+  console.log("[guardrails] plugin created", {
+    version: "0.6.0",
+    outboundGuardEnabled: config.outboundGuard.enabled,
+    injectedFileNames: config.outboundGuard.injectedFileNames,
+    mode: config.mode
+  });
 
   const evaluate = async (
     phase: Phase,
@@ -427,7 +478,7 @@ export function createOpenClawGuardrailsPlugin(
 
   return {
     name: "openclaw-guardrails",
-    version: "0.5.2",
+    version: "0.6.0",
     approveRequest: (
       requestId: string,
       approverId: string,
@@ -435,6 +486,7 @@ export function createOpenClawGuardrailsPlugin(
     ): string | null => engine.approveRequest(requestId, approverId, approverRole),
     hooks: {
       async before_agent_start(context: OpenClawContext): Promise<OpenClawHookResult> {
+        console.log("[guardrails:before_agent_start] hook fired", { contextKeys: Object.keys(context) });
         const decision = await evaluate("before_agent_start", context);
         const guardPrompt = buildGuardPrompt(config);
         const existingPrompt =
@@ -464,6 +516,10 @@ export function createOpenClawGuardrailsPlugin(
       },
 
       async message_received(context: OpenClawContext): Promise<OpenClawHookResult> {
+        console.log("[guardrails:message_received] hook fired", {
+          contextKeys: Object.keys(context),
+          contentPreview: typeof context.content === "string" ? context.content.slice(0, 120) : undefined
+        });
         const decision = await evaluate("message_received", context);
         const transformedContext = decision.redactedContent
           ? upsertContentField(context, decision.redactedContent)
@@ -507,6 +563,25 @@ export function createOpenClawGuardrailsPlugin(
         const transformedContext = decision.redactedContent
           ? upsertContentField(context, decision.redactedContent)
           : context;
+
+        // Record token usage if store is available and context provides token counts
+        if (tokenUsageStore && context.metadata) {
+          const meta = context.metadata as Record<string, unknown>;
+          const inputTokens = typeof meta.inputTokens === "number" ? meta.inputTokens : 0;
+          const outputTokens = typeof meta.outputTokens === "number" ? meta.outputTokens : 0;
+          if (inputTokens > 0 || outputTokens > 0) {
+            tokenUsageStore.record({
+              timestamp: new Date().toISOString(),
+              agentId: (context.agentId as string) ?? "unknown-agent",
+              senderId: (context.senderId as string) ?? "unknown",
+              conversationId: (context.conversationId as string) ?? "unknown",
+              inputTokens,
+              outputTokens,
+              totalTokens: inputTokens + outputTokens,
+              toolName: context.toolName
+            });
+          }
+        }
 
         if (decision.decision === "DENY") {
           return {
@@ -566,14 +641,20 @@ export function createOpenClawGuardrailsPlugin(
       async agent_end(context: OpenClawContext): Promise<OpenClawHookResult> {
         const decision = await evaluate("agent_end", context);
 
+        const metadata: Record<string, unknown> = {
+          ...(context.metadata ?? {}),
+          guardrailsSummary: { ...metrics },
+          guardrailsMonitoring: buildMonitoringSnapshot(config, metrics)
+        };
+
+        if (tokenUsageStore) {
+          metadata.tokenUsageSummary = tokenUsageStore.getSummary();
+        }
+
         return {
           ...context,
           guardrails: { decision },
-          metadata: {
-            ...(context.metadata ?? {}),
-            guardrailsSummary: { ...metrics },
-            guardrailsMonitoring: buildMonitoringSnapshot(config, metrics)
-          }
+          metadata
         };
       }
     }

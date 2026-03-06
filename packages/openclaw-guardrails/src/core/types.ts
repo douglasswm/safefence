@@ -133,6 +133,33 @@ export interface GuardrailsConfig {
     falsePositiveThresholdPct: number;
     consecutiveDaysForTuning: number;
   };
+  audit: {
+    enabled: boolean;
+    sinkPath?: string;
+  };
+  externalValidation?: {
+    enabled: boolean;
+    endpoint: string;
+    timeoutMs?: number;
+    validators: string[];
+    failOpen: boolean;
+  };
+  budgetPersistence: {
+    enabled: boolean;
+    storagePath?: string;
+  };
+  notifications: {
+    enabled: boolean;
+    adminChannelId?: string;
+  };
+}
+
+export interface TokenUsageSummary {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalTokens: number;
+  recordCount: number;
+  byUser: Record<string, { input: number; output: number; total: number }>;
 }
 
 export interface GuardEvent {

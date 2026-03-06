@@ -1,7 +1,12 @@
 import { ApprovalBroker } from "./approval.js";
+import type { AuditEvent, AuditSink } from "./audit-sink.js";
+import { NoopAuditSink } from "./audit-sink.js";
+import type { NotificationSink } from "./notification-sink.js";
+import type { CustomValidator } from "./custom-validator.js";
 import {
   detectBudget,
   detectCommandPolicy,
+  detectExternalValidation,
   detectInputIntent,
   detectNetworkEgress,
   detectOutputSafety,
@@ -18,6 +23,7 @@ import { unique } from "./event-utils.js";
 import { normalizeGuardEvent } from "./normalize.js";
 import { REASON_CODES } from "./reason-codes.js";
 import { aggregateRisk } from "./scoring.js";
+import type { TokenUsageStore } from "./token-usage-store.js";
 import type {
   ApproverRole,
   Decision,
@@ -39,17 +45,32 @@ function decideFromHits(hits: RuleHit[]): Decision {
   return "ALLOW";
 }
 
+export interface EngineOptions {
+  budgetStore?: BudgetStore;
+  approvalBroker?: ApprovalBroker;
+  auditSink?: AuditSink;
+  customValidators?: CustomValidator[];
+  tokenUsageStore?: TokenUsageStore;
+  notificationSink?: NotificationSink;
+}
+
 export class GuardrailsEngine {
   private readonly budgetStore: BudgetStore;
   private readonly approvalBroker: ApprovalBroker;
+  private readonly auditSink: AuditSink;
+  private readonly customValidators: CustomValidator[];
+  readonly tokenUsageStore: TokenUsageStore | undefined;
 
   constructor(
     private readonly config: GuardrailsConfig,
-    budgetStore?: BudgetStore,
-    approvalBroker?: ApprovalBroker
+    options?: EngineOptions
   ) {
-    this.budgetStore = budgetStore ?? new BudgetStore();
-    this.approvalBroker = approvalBroker ?? new ApprovalBroker(config);
+    const opts = options ?? {};
+    this.budgetStore = opts.budgetStore ?? new BudgetStore();
+    this.approvalBroker = opts.approvalBroker ?? new ApprovalBroker(config, undefined, opts.notificationSink);
+    this.auditSink = opts.auditSink ?? new NoopAuditSink();
+    this.customValidators = opts.customValidators ?? [];
+    this.tokenUsageStore = opts.tokenUsageStore;
   }
 
   approveRequest(
@@ -106,6 +127,23 @@ export class GuardrailsEngine {
 
       hits.push(...detectBudget(context, this.budgetStore));
 
+      // External validation + custom validators run concurrently
+      const extensionTasks: Promise<RuleHit[]>[] = [];
+      extensionTasks.push(detectExternalValidation(event, this.config));
+      for (const validator of this.customValidators) {
+        if (validator.phases.length === 0 || validator.phases.includes(event.phase)) {
+          extensionTasks.push(
+            Promise.resolve()
+              .then(() => validator.validate({ event, config: this.config }))
+              .catch(() => [] as RuleHit[])
+          );
+        }
+      }
+      const extensionResults = await Promise.all(extensionTasks);
+      for (const result of extensionResults) {
+        hits.push(...result);
+      }
+
       const redactedContent =
         outputResult.redactedContent ??
         restrictedInfoResult.redactedContent ??
@@ -114,7 +152,7 @@ export class GuardrailsEngine {
       const riskScore = aggregateRisk(hits);
       const elapsedMs = Date.now() - startedAt;
 
-      return this.finalizeDecision(
+      const decision = this.finalizeDecision(
         enforceDecision,
         hits,
         riskScore,
@@ -122,6 +160,24 @@ export class GuardrailsEngine {
         elapsedMs,
         approvalChallenge
       );
+
+      if (this.config.audit.enabled) {
+        const auditEvent: AuditEvent = {
+          timestamp: new Date(startedAt).toISOString(),
+          phase: event.phase,
+          agentId: event.agentId,
+          senderId: event.metadata.principal?.senderId,
+          toolName: event.toolName,
+          decision: decision.decision,
+          reasonCodes: decision.reasonCodes,
+          riskScore: decision.riskScore,
+          elapsedMs: decision.telemetry.elapsedMs,
+          approvalRequestId: decision.approvalChallenge?.requestId
+        };
+        this.auditSink.append(auditEvent);
+      }
+
+      return decision;
     } catch {
       if (this.config.failClosed) {
         return {

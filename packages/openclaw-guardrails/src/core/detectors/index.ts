@@ -9,3 +9,4 @@ export { detectBudget } from "./budget-detector.js";
 export { detectProvenance } from "./provenance-detector.js";
 export { detectPrincipalAuthz } from "./principal-authz-detector.js";
 export { detectOwnerApproval } from "./owner-approval-detector.js";
+export { detectExternalValidation } from "./external-validator-detector.js";
