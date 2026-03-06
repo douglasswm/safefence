@@ -9,6 +9,7 @@
  */
 
 import type { GuardrailsConfig } from "../core/types.js";
+import { redactWithPatterns } from "../redaction/redact.js";
 import { createDefaultConfig, mergeConfig } from "../rules/default-policy.js";
 import { createOpenClawGuardrailsPlugin } from "./openclaw-adapter.js";
 import {
@@ -155,6 +156,13 @@ const plugin = {
     // Outbound content redaction is still enforced by the async
     // `message_sending` hook, which catches leaks before they reach users.
     // ------------------------------------------------------------------
+    // Pre-compile redaction patterns once (config is immutable after merge).
+    const allRedactionPatterns = [
+      ...mergedConfig.redaction.secretPatterns,
+      ...mergedConfig.redaction.piiPatterns,
+    ];
+    const redactionReplacement = mergedConfig.redaction.replacement;
+
     api.on("tool_result_persist", (
       event: ToolResultPersistEvent,
       ctx: ToolResultPersistContext,
@@ -167,30 +175,12 @@ const plugin = {
         log.error(`[guardrails:tool_result_persist] async audit failed: ${String(err)}`);
       });
 
-      // Sync redaction: apply sensitive-data patterns directly to the
-      // message content if available, without the full engine pipeline.
-      const content = typeof event.message?.content === "string"
-        ? event.message.content
-        : undefined;
-      if (content) {
-        const allPatterns = [
-          ...mergedConfig.redaction.secretPatterns,
-          ...mergedConfig.redaction.piiPatterns,
-        ];
-        if (allPatterns.length > 0) {
-          const replacement = mergedConfig.redaction.replacement;
-          let redacted = content;
-          for (const pattern of allPatterns) {
-            try {
-              const regex = new RegExp(pattern, "gi");
-              redacted = redacted.replace(regex, replacement);
-            } catch {
-              // skip invalid patterns
-            }
-          }
-          if (redacted !== content) {
-            return { message: { ...event.message, content: redacted } } satisfies ToolResultPersistResult;
-          }
+      // Sync redaction: reuse content already extracted by the mapper.
+      const content = oclCtx.output;
+      if (content && allRedactionPatterns.length > 0) {
+        const { redacted } = redactWithPatterns(content, allRedactionPatterns, redactionReplacement);
+        if (redacted !== content) {
+          return { message: { ...event.message, content: redacted } } satisfies ToolResultPersistResult;
         }
       }
 

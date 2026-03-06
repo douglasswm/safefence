@@ -114,15 +114,7 @@ export interface AgentEndEvent {
   durationMs?: number;
 }
 
-export interface AgentEndContext {
-  agentId?: string;
-  sessionKey?: string;
-  sessionId?: string;
-  workspaceDir?: string;
-  messageProvider?: string;
-  trigger?: string;
-  channelId?: string;
-}
+export type AgentEndContext = BeforeAgentStartContext;
 
 // ---------------------------------------------------------------------------
 // Event → OpenClawContext mappers
