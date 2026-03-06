@@ -31,28 +31,32 @@ Native TypeScript security kernel for OpenClaw (`>=2026.2.25`) with deterministi
 - Optional persistent approval store (`approval.storagePath`) with storage path validation (must be within `workspaceRoot`) and expired record pruning.
 - Admin notification bridge (`NotificationSink`) for cross-session approval alerts. Ships with `ConsoleNotificationSink`, `CallbackNotificationSink`, and `NoopNotificationSink`.
 
-### Detection Pipeline
-- Prompt injection pattern matching on inbound content.
+### Detection Pipeline (12 detectors, fixed order)
+- Input intent analysis: prompt injection, exfiltration patterns, context probing, and input limits.
 - Command allow/deny policy enforcement with shell operator blocking.
 - Path canonicalization with symlink traversal detection.
 - Network egress validation (host allowlist, private IP blocking).
 - Supply chain verification (skill source trust + hash integrity).
+- Principal authorization (role-based tool policy, group channel enforcement).
+- Owner approval gating (challenges for restricted actions).
 - Sensitive data detection and redaction (secrets, PII) via regex patterns.
-- Output safety checks for system prompt leaks and injected filename references.
 - Restricted-info redaction for non-privileged group principals.
+- Output safety checks for system prompt leaks and injected filename references.
+- Budget enforcement (per-principal partitioned limits).
+- External/custom validators (HTTP-based + user-injected, run concurrently).
 
 ### Operational Controls
 - **Reason code sanitization**: sensitive internal reason codes (e.g. `PROMPT_INJECTION`) are replaced with `CONTENT_POLICY_VIOLATION` in client-facing output to prevent detection fingerprinting.
 - Principal-partitioned budgets (`agent + principal + conversation`).
 - Staged rollout controls (`stage_a_audit`, `stage_b_high_risk_enforce`, `stage_c_full_enforce`).
-- Monitoring snapshot with false-positive threshold signaling.
+- Monitoring snapshot with false-positive threshold signaling. `consecutiveDaysForTuning` is a pass-through config value for external systems; multi-day tracking is not built in.
 - Fail-closed by default — engine errors result in `DENY` unless explicitly configured otherwise.
 
 ### Extensibility
 - **Immutable JSONL audit trail**: every `evaluate()` call optionally emits a structured `AuditEvent` to a JSONL file via `AuditSink`. Enable with `audit.enabled` + `audit.sinkPath`.
 - **Custom business rule validators**: inject domain-specific logic (spending limits, data access boundaries) via the `CustomValidator` interface without forking. Validators are phase-filtered and run concurrently with external validators.
 - **External validator integration**: optional HTTP-based semantic validation (jailbreak detection, PII scanning) via configurable endpoint. Circuit breaker (3 failures → 60s cooldown), configurable timeout, fail-open mode.
-- **Per-user token usage tracking**: records input/output token counts per user/conversation/tool via `TokenUsageStore`. JSONL persistence, per-user aggregation summaries emitted at `agent_end`.
+- **Per-user token usage tracking**: records input/output token counts per user/conversation/tool via `TokenUsageStore`. JSONL persistence, per-user aggregation summaries emitted at `agent_end`. Token recording is wired through the `tool_result_persist` hook in the plugin adapter; direct engine users call `tokenUsageStore.record()` explicitly.
 
 ## Architecture
 
@@ -82,7 +86,20 @@ src/
 │   ├── retrieval-trust.ts            # Retrieval trust level evaluation
 │   ├── supply-chain.ts               # Skill source + hash policy
 │   └── detectors/                    # Security detector modules
-│       └── external-validator-detector.ts  # HTTP external validation + circuit breaker
+│       ├── index.ts                  # Detector exports
+│       ├── types.ts                  # Detector type definitions
+│       ├── budget-detector.ts        # Per-principal budget enforcement
+│       ├── command-policy-detector.ts    # Command allow/deny + shell operator blocking
+│       ├── external-validator-detector.ts  # HTTP external validation + circuit breaker
+│       ├── input-intent-detector.ts  # Prompt injection, exfiltration, context probing
+│       ├── network-egress-detector.ts    # Host allowlist + private IP blocking
+│       ├── output-safety-detector.ts     # System prompt leak + filename injection
+│       ├── owner-approval-detector.ts    # Approval challenge gating
+│       ├── path-canonical-detector.ts    # Symlink traversal detection
+│       ├── principal-authz-detector.ts   # Role-based authorization
+│       ├── provenance-detector.ts    # Skill source trust + hash integrity
+│       ├── restricted-info-detector.ts   # Non-privileged group redaction
+│       └── sensitive-data-detector.ts    # Secret/PII detection
 ├── plugin/
 │   ├── openclaw-adapter.ts           # OpenClaw hook adapter + summary telemetry
 │   └── openclaw-extension.ts         # Plugin entry point (registerOpenClawGuardrails)

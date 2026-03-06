@@ -92,8 +92,7 @@ export class ApprovalStore {
 
   private pruneExpired(nowMs: number): void {
     for (const [id, record] of this.byRequestId) {
-      // Only prune records that are both expired AND used (or expired without a token).
-      // Used-but-not-expired records must be retained for replay detection.
+      // Prune all expired records. Non-expired records must be retained for replay detection.
       if (record.expiresAt <= nowMs) {
         if (record.token) {
           this.requestIdByToken.delete(record.token);
