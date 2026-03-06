@@ -32,6 +32,9 @@
     "llm"
   ],
   "license": "MIT",
+  "peerDependencies": {
+    "openclaw": ">=2026.2.25"
+  },
   "devDependencies": {
     "@vitest/coverage-v8": "^2.1.8",
     "@types/node": "^22.9.0",

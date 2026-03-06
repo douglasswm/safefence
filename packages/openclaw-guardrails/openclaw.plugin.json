@@ -1,12 +1,11 @@
 {
   "id": "openclaw-guardrails",
   "name": "openclaw-guardrails",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Deterministic local guardrails for OpenClaw hooks",
-  "entry": "dist/plugin/openclaw-extension.js",
   "configSchema": {
     "type": "object",
-    "additionalProperties": true,
+    "additionalProperties": false,
     "properties": {
       "mode": {
         "type": "string",
@@ -172,15 +171,45 @@
           "falsePositiveThresholdPct": { "type": "number", "default": 3 },
           "consecutiveDaysForTuning": { "type": "number", "default": 2 }
         }
+      },
+      "audit": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": false },
+          "sinkPath": { "type": "string" }
+        }
+      },
+      "externalValidation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": false },
+          "endpoint": { "type": "string" },
+          "timeoutMs": { "type": "number" },
+          "validators": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "failOpen": { "type": "boolean", "default": false }
+        }
+      },
+      "budgetPersistence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": false },
+          "storagePath": { "type": "string" }
+        }
+      },
+      "notifications": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": false },
+          "adminChannelId": { "type": "string" }
+        }
       }
     }
-  },
-  "hooks": [
-    "before_agent_start",
-    "message_received",
-    "before_tool_call",
-    "tool_result_persist",
-    "message_sending",
-    "agent_end"
-  ]
+  }
 }

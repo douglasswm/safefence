@@ -1,133 +1,260 @@
-import { isObject, asRecord } from "../core/event-utils.js";
+/**
+ * OpenClaw plugin entry point for @safefence/openclaw-guardrails.
+ *
+ * Uses the real OpenClaw plugin API:
+ * - `api.on()` for typed hooks (return values are honoured)
+ * - `api.pluginConfig` for validated config
+ * - `api.logger` for structured logging
+ * - `api.registerCommand()` for the /approve command
+ */
+
 import type { GuardrailsConfig } from "../core/types.js";
+import { createDefaultConfig, mergeConfig } from "../rules/default-policy.js";
+import { createOpenClawGuardrailsPlugin } from "./openclaw-adapter.js";
 import {
-  createOpenClawGuardrailsPlugin,
-  type OpenClawContext,
-  type OpenClawHookResult
-} from "./openclaw-adapter.js";
+  mapBeforeAgentStart,
+  mapMessageReceived,
+  mapBeforeToolCall,
+  mapToolResultPersist,
+  mapMessageSending,
+  mapAgentEnd,
+  mapToBeforeAgentStartResult,
+  mapToBeforeToolCallResult,
+  mapToMessageSendingResult,
+  type BeforeAgentStartEvent,
+  type BeforeAgentStartContext,
+  type MessageReceivedEvent,
+  type MessageReceivedContext,
+  type BeforeToolCallEvent,
+  type BeforeToolCallContext,
+  type ToolResultPersistEvent,
+  type ToolResultPersistContext,
+  type ToolResultPersistResult,
+  type MessageSendingEvent,
+  type MessageSendingContext,
+  type AgentEndEvent,
+  type AgentEndContext,
+} from "./event-adapter.js";
 
-const PLUGIN_ID = "openclaw-guardrails";
+// ---------------------------------------------------------------------------
+// Structural types for the OpenClaw plugin API.
+//
+// We use structural typing so that the package compiles without a hard import
+// of the `openclaw` module at build time. At runtime, OpenClaw's jiti alias
+// resolves `openclaw/plugin-sdk` if needed, and the structural shape is
+// compatible with the real `OpenClawPluginApi`.
+// ---------------------------------------------------------------------------
 
-interface HookRegistration {
-  name?: string;
-  description?: string;
+interface PluginLogger {
+  debug?: (message: string) => void;
+  info: (message: string) => void;
+  warn: (message: string) => void;
+  error: (message: string) => void;
 }
 
-interface OpenClawPluginApi {
-  config?: unknown;
-  registerHook?: (
-    hookName: string,
-    handler: (context: unknown) => Promise<OpenClawHookResult> | OpenClawHookResult,
-    registration?: HookRegistration
-  ) => void;
-  logger?: {
-    warn?: (message: string) => void;
-  };
+interface PluginCommandContext {
+  senderId?: string;
+  args?: string;
+  commandBody: string;
+  isAuthorizedSender: boolean;
 }
 
-function isGuardrailsConfig(value: Record<string, unknown>): boolean {
-  const knownKeys = [
-    "mode",
-    "failClosed",
-    "workspaceRoot",
-    "allow",
-    "deny",
-    "redaction",
-    "limits",
-    "pathPolicy",
-    "supplyChain",
-    "retrievalTrust",
-    "principal",
-    "authorization",
-    "approval",
-    "tenancy",
-    "outboundGuard",
-    "rollout",
-    "monitoring"
-  ];
-
-  return knownKeys.some((key) => key in value);
+interface PluginCommandResult {
+  text?: string;
 }
 
-function getPluginConfig(rawConfig: unknown): Partial<GuardrailsConfig> {
-  if (!isObject(rawConfig)) {
-    return {};
-  }
+interface PluginApi {
+  id: string;
+  name: string;
+  config: unknown;
+  pluginConfig?: Record<string, unknown>;
+  logger: PluginLogger;
+  resolvePath: (input: string) => string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  on: (hookName: string, handler: (...args: any[]) => any, opts?: { priority?: number }) => void;
+  registerCommand: (command: {
+    name: string;
+    description: string;
+    acceptsArgs?: boolean;
+    requireAuth?: boolean;
+    handler: (ctx: PluginCommandContext) => PluginCommandResult | Promise<PluginCommandResult>;
+  }) => void;
+}
 
-  const plugins = rawConfig.plugins;
-  if (isObject(plugins)) {
-    const entries = plugins.entries;
-    if (isObject(entries)) {
-      const entry = entries[PLUGIN_ID];
-      if (isObject(entry) && isObject(entry.config)) {
-        return entry.config as Partial<GuardrailsConfig>;
+// ---------------------------------------------------------------------------
+// Plugin definition
+// ---------------------------------------------------------------------------
+
+const plugin = {
+  id: "openclaw-guardrails",
+  name: "OpenClaw Guardrails",
+  version: "0.6.0",
+
+  register(api: PluginApi) {
+    const rawConfig = (api.pluginConfig ?? {}) as Partial<GuardrailsConfig>;
+    const log = api.logger;
+    const mergedConfig = mergeConfig(
+      createDefaultConfig(rawConfig.workspaceRoot ?? process.cwd()),
+      rawConfig,
+    );
+
+    const guardrails = createOpenClawGuardrailsPlugin(rawConfig);
+
+    log.info(`[guardrails] plugin registered (v${guardrails.version}, mode=${mergedConfig.mode})`);
+
+    // ------------------------------------------------------------------
+    // before_agent_start — inject security policy prompt
+    // ------------------------------------------------------------------
+    api.on("before_agent_start", async (
+      event: BeforeAgentStartEvent,
+      ctx: BeforeAgentStartContext,
+    ) => {
+      const oclCtx = mapBeforeAgentStart(event, ctx);
+      const result = await guardrails.hooks.before_agent_start(oclCtx);
+      log.debug?.(`[guardrails:before_agent_start] decision=${result.guardrails?.decision?.decision}`);
+      return mapToBeforeAgentStartResult(result);
+    });
+
+    // ------------------------------------------------------------------
+    // message_received — observe-only (cannot block via return value)
+    // Audit violations but enforcement is deferred to before_tool_call.
+    // ------------------------------------------------------------------
+    api.on("message_received", async (
+      event: MessageReceivedEvent,
+      ctx: MessageReceivedContext,
+    ) => {
+      const oclCtx = mapMessageReceived(event, ctx);
+      const result = await guardrails.hooks.message_received(oclCtx);
+      if (result.blocked) {
+        log.warn(`[guardrails:message_received] inbound content would be blocked: ${result.reasonCodes?.join(", ")}`);
       }
-    }
-  }
+      // void return — message_received cannot block in OpenClaw
+    });
 
-  if (isGuardrailsConfig(rawConfig)) {
-    return rawConfig as Partial<GuardrailsConfig>;
-  }
+    // ------------------------------------------------------------------
+    // before_tool_call — authorize and gate tool calls
+    // ------------------------------------------------------------------
+    api.on("before_tool_call", async (
+      event: BeforeToolCallEvent,
+      ctx: BeforeToolCallContext,
+    ) => {
+      const oclCtx = mapBeforeToolCall(event, ctx);
+      const result = await guardrails.hooks.before_tool_call(oclCtx);
+      log.debug?.(`[guardrails:before_tool_call] tool=${event.toolName} decision=${result.guardrails?.decision?.decision}`);
+      return mapToBeforeToolCallResult(result);
+    });
 
-  return {};
-}
+    // ------------------------------------------------------------------
+    // tool_result_persist — sanitize tool output before persistence
+    //
+    // IMPORTANT: This hook is synchronous in OpenClaw (returns result | void,
+    // no Promise). The guardrails engine is async (external validators,
+    // network checks). We fire the engine evaluation asynchronously for
+    // audit/metrics tracking but cannot use its result for redaction here.
+    //
+    // Outbound content redaction is still enforced by the async
+    // `message_sending` hook, which catches leaks before they reach users.
+    // ------------------------------------------------------------------
+    api.on("tool_result_persist", (
+      event: ToolResultPersistEvent,
+      ctx: ToolResultPersistContext,
+    ) => {
+      const oclCtx = mapToolResultPersist(event, ctx);
 
-function registerHook(
-  api: OpenClawPluginApi,
-  hookName: string,
-  handler: (context: OpenClawContext) => Promise<OpenClawHookResult>,
-  description: string
-): void {
-  api.registerHook?.(hookName, (context: unknown) => handler(asRecord(context) as OpenClawContext), {
-    name: `${PLUGIN_ID}.${hookName}`,
-    description
-  });
-}
+      // Fire engine evaluation async for audit trail and metrics.
+      // Result is intentionally not awaited (sync hook constraint).
+      guardrails.hooks.tool_result_persist(oclCtx).catch((err: unknown) => {
+        log.error(`[guardrails:tool_result_persist] async audit failed: ${String(err)}`);
+      });
 
-export function registerOpenClawGuardrails(api: OpenClawPluginApi): void {
-  if (typeof api.registerHook !== "function") {
-    api.logger?.warn?.("[openclaw-guardrails] registerHook API is unavailable.");
-    return;
-  }
+      // Sync redaction: apply sensitive-data patterns directly to the
+      // message content if available, without the full engine pipeline.
+      const content = typeof event.message?.content === "string"
+        ? event.message.content
+        : undefined;
+      if (content) {
+        const allPatterns = [
+          ...mergedConfig.redaction.secretPatterns,
+          ...mergedConfig.redaction.piiPatterns,
+        ];
+        if (allPatterns.length > 0) {
+          const replacement = mergedConfig.redaction.replacement;
+          let redacted = content;
+          for (const pattern of allPatterns) {
+            try {
+              const regex = new RegExp(pattern, "gi");
+              redacted = redacted.replace(regex, replacement);
+            } catch {
+              // skip invalid patterns
+            }
+          }
+          if (redacted !== content) {
+            return { message: { ...event.message, content: redacted } } satisfies ToolResultPersistResult;
+          }
+        }
+      }
 
-  const plugin = createOpenClawGuardrailsPlugin(getPluginConfig(api.config));
+      return {};
+    });
 
-  registerHook(
-    api,
-    "before_agent_start",
-    plugin.hooks.before_agent_start,
-    "Inject immutable security policy prompt before agent execution."
-  );
-  registerHook(
-    api,
-    "message_received",
-    plugin.hooks.message_received,
-    "Evaluate inbound message content for prompt injection and data leaks."
-  );
-  registerHook(
-    api,
-    "before_tool_call",
-    plugin.hooks.before_tool_call,
-    "Authorize and gate tool calls before execution."
-  );
-  registerHook(
-    api,
-    "tool_result_persist",
-    plugin.hooks.tool_result_persist,
-    "Sanitize tool output before persistence."
-  );
-  registerHook(
-    api,
-    "message_sending",
-    plugin.hooks.message_sending,
-    "Gate outbound agent responses for system prompt leaks and sensitive data."
-  );
-  registerHook(
-    api,
-    "agent_end",
-    plugin.hooks.agent_end,
-    "Publish aggregated guardrails summary and monitoring metrics."
-  );
-}
+    // ------------------------------------------------------------------
+    // message_sending — gate outbound agent responses
+    // ------------------------------------------------------------------
+    api.on("message_sending", async (
+      event: MessageSendingEvent,
+      ctx: MessageSendingContext,
+    ) => {
+      const oclCtx = mapMessageSending(event, ctx);
+      const result = await guardrails.hooks.message_sending(oclCtx);
+      log.debug?.(`[guardrails:message_sending] decision=${result.guardrails?.decision?.decision}`);
+      return mapToMessageSendingResult(result);
+    });
 
-export default registerOpenClawGuardrails;
+    // ------------------------------------------------------------------
+    // agent_end — observe-only (publish metrics)
+    // ------------------------------------------------------------------
+    api.on("agent_end", async (
+      event: AgentEndEvent,
+      ctx: AgentEndContext,
+    ) => {
+      const oclCtx = mapAgentEnd(event, ctx);
+      const result = await guardrails.hooks.agent_end(oclCtx);
+      const summary = result.metadata?.guardrailsSummary as Record<string, unknown> | undefined;
+      if (summary) {
+        log.info(`[guardrails:agent_end] summary: total=${summary.total} blocked=${summary.blocked} redacted=${summary.redacted}`);
+      }
+      // void return — agent_end is observe-only
+    });
+
+    // ------------------------------------------------------------------
+    // /approve command — approve a guardrail-gated action
+    // ------------------------------------------------------------------
+    api.registerCommand({
+      name: "approve",
+      description: "Approve a guardrail-gated action by request ID",
+      acceptsArgs: true,
+      requireAuth: true,
+      handler: (ctx: PluginCommandContext) => {
+        const requestId = ctx.args?.trim();
+        if (!requestId) {
+          return { text: "Usage: /approve <request-id>" };
+        }
+
+        const senderId = ctx.senderId ?? "unknown";
+        if (!ctx.isAuthorizedSender) {
+          return { text: "Only authorized senders (owner/admin) can approve requests." };
+        }
+        const token = guardrails.approveRequest(requestId, senderId, "owner");
+
+        if (token) {
+          log.info(`[guardrails:approve] request ${requestId} approved by ${senderId}`);
+          return { text: `Approved. Token: ${token}` };
+        }
+
+        return { text: `Approval failed for request ${requestId}. It may have expired or already been processed.` };
+      },
+    });
+  },
+};
+
+export default plugin;
