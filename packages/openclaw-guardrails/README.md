@@ -1,5 +1,7 @@
 # OpenClaw Guardrails v3
 
+> **Experimental** -- This project is under active development and not yet production-ready. APIs, config schemas, and behavior may change without notice between releases.
+
 Native TypeScript security kernel for OpenClaw (`>=2026.2.25`) with deterministic local enforcement, principal-aware authorization, and owner approval for group/multi-user safety.
 
 ## Repository Context
