@@ -1,7 +1,7 @@
 {
   "id": "openclaw-guardrails",
   "name": "openclaw-guardrails",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Deterministic local guardrails for OpenClaw hooks",
   "configSchema": {
     "type": "object",

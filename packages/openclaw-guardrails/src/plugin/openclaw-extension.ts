@@ -10,8 +10,8 @@
 
 import type { GuardrailsConfig } from "../core/types.js";
 import { redactWithPatterns } from "../redaction/redact.js";
-import { createDefaultConfig, mergeConfig } from "../rules/default-policy.js";
 import { createOpenClawGuardrailsPlugin } from "./openclaw-adapter.js";
+import { PLUGIN_VERSION } from "./version.js";
 import {
   mapBeforeAgentStart,
   mapMessageReceived,
@@ -89,17 +89,13 @@ interface PluginApi {
 const plugin = {
   id: "openclaw-guardrails",
   name: "OpenClaw Guardrails",
-  version: "0.6.1",
+  version: PLUGIN_VERSION,
 
   register(api: PluginApi) {
     const rawConfig = (api.pluginConfig ?? {}) as Partial<GuardrailsConfig>;
     const log = api.logger;
-    const mergedConfig = mergeConfig(
-      createDefaultConfig(rawConfig.workspaceRoot ?? process.cwd()),
-      rawConfig,
-    );
-
     const guardrails = createOpenClawGuardrailsPlugin(rawConfig);
+    const mergedConfig = guardrails.config;
 
     log.info(`[guardrails] plugin registered (v${guardrails.version}, mode=${mergedConfig.mode})`);
 

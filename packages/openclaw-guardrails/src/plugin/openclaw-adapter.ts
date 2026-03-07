@@ -1,11 +1,12 @@
 import { JsonlAuditSink, NoopAuditSink } from "../core/audit-sink.js";
 import type { AuditSink } from "../core/audit-sink.js";
 import { GuardrailsEngine } from "../core/engine.js";
-import { unique } from "../core/event-utils.js";
+import { isObject, unique } from "../core/event-utils.js";
 import { ConsoleNotificationSink } from "../core/notification-sink.js";
 import type { NotificationSink } from "../core/notification-sink.js";
 import { REASON_CODES } from "../core/reason-codes.js";
 import { TokenUsageStore } from "../core/token-usage-store.js";
+import { PLUGIN_VERSION } from "./version.js";
 import { createDefaultConfig, mergeConfig } from "../rules/default-policy.js";
 import type {
   ApproverRole,
@@ -53,6 +54,7 @@ export interface OpenClawHookResult extends OpenClawContext {
 export interface OpenClawPlugin {
   name: string;
   version: string;
+  config: GuardrailsConfig;
   approveRequest: (
     requestId: string,
     approverId: string,
@@ -419,8 +421,8 @@ export interface PluginOptions {
 }
 
 function isPluginOptions(arg: unknown): arg is PluginOptions {
-  if (!arg || typeof arg !== "object") return false;
-  const obj = arg as Record<string, unknown>;
+  if (!isObject(arg)) return false;
+  const obj = arg;
   // PluginOptions has keys that never appear on GuardrailsConfig
   return "auditSink" in obj || "notificationSink" in obj ||
     ("config" in obj && (obj.config === undefined || (typeof obj.config === "object" && obj.config !== null)));
@@ -460,7 +462,7 @@ export function createOpenClawGuardrailsPlugin(
   const metrics = createMetrics();
 
   console.log("[guardrails] plugin created", {
-    version: "0.6.1",
+    version: PLUGIN_VERSION,
     outboundGuardEnabled: config.outboundGuard.enabled,
     injectedFileNames: config.outboundGuard.injectedFileNames,
     mode: config.mode
@@ -478,7 +480,8 @@ export function createOpenClawGuardrailsPlugin(
 
   return {
     name: "openclaw-guardrails",
-    version: "0.6.1",
+    version: PLUGIN_VERSION,
+    config,
     approveRequest: (
       requestId: string,
       approverId: string,
@@ -486,7 +489,6 @@ export function createOpenClawGuardrailsPlugin(
     ): string | null => engine.approveRequest(requestId, approverId, approverRole),
     hooks: {
       async before_agent_start(context: OpenClawContext): Promise<OpenClawHookResult> {
-        console.log("[guardrails:before_agent_start] hook fired", { contextKeys: Object.keys(context) });
         const decision = await evaluate("before_agent_start", context);
         const guardPrompt = buildGuardPrompt(config);
         const existingPrompt =
@@ -516,10 +518,6 @@ export function createOpenClawGuardrailsPlugin(
       },
 
       async message_received(context: OpenClawContext): Promise<OpenClawHookResult> {
-        console.log("[guardrails:message_received] hook fired", {
-          contextKeys: Object.keys(context),
-          contentPreview: typeof context.content === "string" ? context.content.slice(0, 120) : undefined
-        });
         const decision = await evaluate("message_received", context);
         const transformedContext = decision.redactedContent
           ? upsertContentField(context, decision.redactedContent)
@@ -599,20 +597,6 @@ export function createOpenClawGuardrailsPlugin(
       },
 
       async message_sending(context: OpenClawContext): Promise<OpenClawHookResult> {
-        const aggregated = extractOutboundContent(context);
-        const stringFields: Record<string, string> = {};
-        for (const [k, v] of Object.entries(context)) {
-          if (typeof v === "string" && v.length > 0) {
-            stringFields[k] = v.length > 120 ? v.slice(0, 120) + "…" : v;
-          }
-        }
-        console.log("[guardrails:message_sending] hook fired", {
-          aggregatedLength: aggregated.length,
-          aggregatedPreview: aggregated.slice(0, 200),
-          stringFields,
-          contextKeys: Object.keys(context)
-        });
-
         if (!config.outboundGuard.enabled) {
           return { ...context };
         }

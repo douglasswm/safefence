@@ -1,6 +1,6 @@
 {
   "name": "@safefence/openclaw-guardrails",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Native deterministic guardrails plugin for OpenClaw",
   "openclaw": {
     "extensions": [
@@ -19,7 +19,10 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "preversion": "npm test && npm run build",
+    "version": "bash scripts/sync-version.sh",
+    "postversion": "echo '\nRun these to publish:\n  git push origin master --tags\n  npm publish --access public'"
   },
   "engines": {
     "node": ">=20"
