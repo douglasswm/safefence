@@ -28,81 +28,88 @@ Native TypeScript security kernel for OpenClaw (`>=2026.2.25`) with deterministi
 
 The plugin has three layers: `openclaw-extension.ts` registers typed hooks with OpenClaw, `event-adapter.ts` maps between OpenClaw's structured `(event, ctx)` pairs and the internal `OpenClawContext`, and `openclaw-adapter.ts` converts contexts into `GuardEvent`s for the engine.
 
-```mermaid
-sequenceDiagram
-    participant OC as OpenClaw Runtime
-    participant EXT as openclaw-extension.ts
-    participant EA as event-adapter.ts
-    participant ADP as openclaw-adapter.ts
-    participant ENG as GuardrailsEngine
-
-    OC->>EXT: api.on(hookName, handler)
-    EXT->>EA: map*(event, ctx) → OpenClawContext
-    EXT->>ADP: hooks.<hookName>(oclCtx)
-    ADP->>ADP: toEvent(phase, ctx) → GuardEvent
-    ADP->>ENG: engine.evaluate(guardEvent, phase)
-    ENG-->>ADP: GuardDecision
-    ADP->>ADP: applyRolloutPolicy()
-    ADP->>ADP: updateMetrics()
-    ADP-->>EXT: OpenClawHookResult
-    EXT->>EA: mapTo*Result(hookResult) → typed result
-    EXT-->>OC: hook-specific return value
+```
+OpenClaw Runtime
+  │
+  ▼
+openclaw-extension.ts ──► api.on(hookName, handler)
+  │
+  ├──► event-adapter.ts: map*(event, ctx) → OpenClawContext
+  │
+  ▼
+openclaw-adapter.ts
+  │  toEvent(phase, ctx) → GuardEvent
+  │
+  ▼
+GuardrailsEngine ──► engine.evaluate(guardEvent, phase)
+  │
+  ▼
+GuardDecision
+  │
+  ▼
+openclaw-adapter.ts
+  │  applyRolloutPolicy()
+  │  updateMetrics()
+  │
+  ▼
+OpenClawHookResult
+  │
+  ▼
+event-adapter.ts: mapTo*Result(hookResult) → typed result
+  │
+  ▼
+OpenClaw Runtime ◄── hook-specific return value
 ```
 
 ### Hook Lifecycle
 
 Six lifecycle hooks span the full agent interaction. Each hook has different blocking/redaction capabilities:
 
-```mermaid
-sequenceDiagram
-    participant U as User / Channel
-    participant OC as OpenClaw
-    participant G as Guardrails Plugin
-
-    rect rgb(240, 248, 255)
-    Note over U,G: Agent Initialization
-    OC->>G: before_agent_start(prompt, agentCtx)
-    G-->>OC: { prependSystemContext: securityPolicy }
-    Note right of G: Injects immutable security prompt
-    end
-
-    rect rgb(255, 248, 240)
-    Note over U,G: Inbound Message
-    U->>OC: Send message
-    OC->>G: message_received(from, content, channelCtx)
-    G-->>OC: void (observe-only, cannot block)
-    Note right of G: Audits violations, defers enforcement
-    end
-
-    rect rgb(240, 255, 240)
-    Note over U,G: Tool Execution Gate
-    OC->>G: before_tool_call(toolName, params, agentCtx)
-    G-->>OC: { block: true, blockReason } or {}
-    Note right of G: Primary enforcement point
-    end
-
-    rect rgb(255, 255, 240)
-    Note over U,G: Tool Result Persistence
-    OC->>G: tool_result_persist(message, toolCtx)
-    G-->>OC: { message: { content: redacted } } or {}
-    Note right of G: Sync regex redaction only
-    Note right of G: Async engine eval for audit (fire-and-forget)
-    end
-
-    rect rgb(255, 240, 240)
-    Note over U,G: Outbound Message Gate
-    OC->>G: message_sending(content, channelCtx)
-    G-->>OC: { cancel: true } or { content: redacted } or {}
-    Note right of G: Blocks system prompt leaks
-    Note right of G: Always enforced in stage_b rollout
-    end
-
-    rect rgb(248, 240, 255)
-    Note over U,G: Session End
-    OC->>G: agent_end(messages, success, agentCtx)
-    G-->>OC: void (observe-only)
-    Note right of G: Emits metrics + monitoring snapshot
-    end
+```
+User / Channel          OpenClaw              Guardrails Plugin
+      │                    │                        │
+      │     ┌──────────────────────────────────────────────────────┐
+      │     │ 1. Agent Initialization                              │
+      │     │    OC ──► before_agent_start(prompt, agentCtx)       │
+      │     │    OC ◄── { prependSystemContext: securityPolicy }   │
+      │     │    Injects immutable security prompt                 │
+      │     └──────────────────────────────────────────────────────┘
+      │                    │                        │
+      │     ┌──────────────────────────────────────────────────────┐
+      │     │ 2. Inbound Message                                   │
+      │ ──► │    OC ──► message_received(from, content, channelCtx)│
+      │     │    OC ◄── void (observe-only, cannot block)          │
+      │     │    Audits violations, defers enforcement             │
+      │     └──────────────────────────────────────────────────────┘
+      │                    │                        │
+      │     ┌──────────────────────────────────────────────────────┐
+      │     │ 3. Tool Execution Gate                               │
+      │     │    OC ──► before_tool_call(toolName, params, agentCtx│
+      │     │    OC ◄── { block: true, blockReason } or {}         │
+      │     │    *** Primary enforcement point ***                 │
+      │     └──────────────────────────────────────────────────────┘
+      │                    │                        │
+      │     ┌──────────────────────────────────────────────────────┐
+      │     │ 4. Tool Result Persistence                           │
+      │     │    OC ──► tool_result_persist(message, toolCtx)      │
+      │     │    OC ◄── { message: { content: redacted } } or {}   │
+      │     │    Sync regex redaction; async engine eval for audit  │
+      │     └──────────────────────────────────────────────────────┘
+      │                    │                        │
+      │     ┌──────────────────────────────────────────────────────┐
+      │     │ 5. Outbound Message Gate                             │
+      │     │    OC ──► message_sending(content, channelCtx)       │
+      │     │    OC ◄── { cancel: true } or { content: redacted }  │
+      │     │    Blocks system prompt leaks                        │
+      │     │    Always enforced in stage_b rollout                │
+      │     └──────────────────────────────────────────────────────┘
+      │                    │                        │
+      │     ┌──────────────────────────────────────────────────────┐
+      │     │ 6. Session End                                       │
+      │     │    OC ──► agent_end(messages, success, agentCtx)     │
+      │     │    OC ◄── void (observe-only)                        │
+      │     │    Emits metrics + monitoring snapshot               │
+      │     └──────────────────────────────────────────────────────┘
 ```
 
 ### Hook Capability Matrix
@@ -120,61 +127,37 @@ sequenceDiagram
 
 All 12 detectors run sequentially for every `engine.evaluate()` call. No short-circuiting — an early DENY does not skip later detectors. All hits are merged, then `DENY > REDACT > ALLOW` precedence determines the outcome.
 
-```mermaid
-sequenceDiagram
-    participant ENG as Engine.evaluate()
-    participant D1 as 1. Input Intent
-    participant D2 as 2. Command Policy
-    participant D3 as 3. Path Canonical
-    participant D4 as 4. Network Egress
-    participant D5 as 5. Provenance
-    participant D6 as 6. Principal Authz
-    participant D7 as 7. Owner Approval
-    participant D8 as 8. Sensitive Data
-    participant D9 as 9. Restricted Info
-    participant D10 as 10. Output Safety
-    participant D11 as 11. Budget
-    participant D12 as 12. Extensions
-
-    Note over ENG: normalizeGuardEvent(rawEvent)
-
-    ENG->>D1: size limits, injection, exfil, context probes
-    D1-->>ENG: hits[]
-    ENG->>D2: tool allowlist, binary allowlist, shell ops, destructive cmds
-    Note over D2: before_tool_call only
-    D2-->>ENG: hits[]
-    ENG->>D3: path traversal, workspace boundary, symlinks
-    Note over D3: async (realpath), before_tool_call only
-    D3-->>ENG: hits[]
-    ENG->>D4: host allowlist, private egress, DNS validation
-    Note over D4: async (DNS), before_tool_call only
-    D4-->>ENG: hits[]
-    ENG->>D5: supply chain trust + retrieval trust
-    Note over D5: async, before_tool_call only
-    D5-->>ENG: hits[]
-    ENG->>D6: identity resolution, RBAC, mention-gating
-    Note over D6: Anti-spoofing: owner/admin derived from config only
-    D6-->>ENG: hits[] + approvalRequirement?
-    ENG->>D7: challenge/verify approval token
-    Note over D7: Only runs if D6 returned approvalRequirement
-    D7-->>ENG: hits[] + approvalChallenge?
-    ENG->>D8: secret patterns → PII patterns (cascaded)
-    D8-->>ENG: hits[] + redactedContent?
-    ENG->>D9: data-class redaction for non-owner principals
-    D9-->>ENG: hits[] + redactedContent?
-    ENG->>D10: system prompt leak, suspicious output patterns
-    Note over D10: Receives pre-redacted content from D9/D8
-    D10-->>ENG: hits[] + redactedContent?
-    ENG->>D11: requests/min + tool calls/min (sliding window)
-    D11-->>ENG: hits[]
-    ENG->>D12: external HTTP validators + custom validators
-    Note over D12: Concurrent via Promise.all, custom validators fail-open
-    D12-->>ENG: hits[]
-
-    Note over ENG: decideFromHits(): DENY > REDACT > ALLOW
-    Note over ENG: aggregateRisk(): 1 - exp(-weighted_sum)
-    Note over ENG: finalizeDecision(): audit mode override
-    Note over ENG: auditSink.append() if enabled
+```
+Engine.evaluate()
+  │
+  │  normalizeGuardEvent(rawEvent)
+  │
+  ├──► D1  Input Intent ── size limits, injection, exfil, context probes ──► hits[]
+  ├──► D2  Command Policy ── tool allowlist, binary allowlist, shell ops ──► hits[]
+  │        (before_tool_call only)
+  ├──► D3  Path Canonical ── path traversal, workspace boundary, symlinks ──► hits[]
+  │        (async realpath, before_tool_call only)
+  ├──► D4  Network Egress ── host allowlist, private egress, DNS ──► hits[]
+  │        (async DNS, before_tool_call only)
+  ├──► D5  Provenance ── supply chain trust + retrieval trust ──► hits[]
+  │        (async, before_tool_call only)
+  ├──► D6  Principal Authz ── identity, RBAC, mention-gating ──► hits[] + approvalRequirement?
+  │        (anti-spoofing: owner/admin derived from config only)
+  ├──► D7  Owner Approval ── challenge/verify approval token ──► hits[] + approvalChallenge?
+  │        (only runs if D6 returned approvalRequirement)
+  ├──► D8  Sensitive Data ── secret patterns → PII patterns (cascaded) ──► hits[] + redactedContent?
+  ├──► D9  Restricted Info ── data-class redaction for non-owner principals ──► hits[] + redactedContent?
+  ├──► D10 Output Safety ── prompt leak, injected filenames, suspicious patterns ──► hits[] + redactedContent?
+  │        (receives pre-redacted content from D9/D8)
+  ├──► D11 Budget ── requests/min + tool calls/min (sliding window) ──► hits[]
+  └──► D12 Extensions ── external HTTP + custom validators ──► hits[]
+           (concurrent via Promise.all, custom validators fail-open)
+  │
+  │  decideFromHits(): DENY > REDACT > ALLOW
+  │  aggregateRisk(): 1 - exp(-weighted_sum)
+  │  finalizeDecision(): audit mode override
+  │  auditSink.append() if enabled
+  ▼
 ```
 
 #### Detector Details
@@ -200,29 +183,37 @@ Risk score formula: `1 - exp(-Σ(clamp(weight, 0, 1) × multiplier))` where DENY
 
 ### Decision Finalization
 
-```mermaid
-flowchart TD
-    A[All RuleHits merged] --> B{Any DENY hit?}
-    B -->|Yes| C[decision = DENY]
-    B -->|No| D{Any REDACT hit?}
-    D -->|Yes| E[decision = REDACT]
-    D -->|No| F[decision = ALLOW]
-    C --> G{mode = audit?}
-    E --> G
-    F --> H[Return GuardDecision]
-    G -->|Yes| I[Override to ALLOW<br/>Prepend AUDIT_WOULD_DENY/REDACT<br/>Redact only if applyInAuditMode]
-    G -->|No| J[Return as-is with enforcement]
-    I --> H
-    J --> H
+```
+All RuleHits merged
+  │
+  ▼
+Any DENY hit? ──Yes──► decision = DENY ──┐
+  │ No                                    │
+  ▼                                       ▼
+Any REDACT hit? ──Yes──► decision = REDACT ──► mode = audit?
+  │ No                                           │
+  ▼                                         Yes ─┤── No
+decision = ALLOW                                 │      │
+  │                                              ▼      ▼
+  │                              Override to ALLOW    Return as-is
+  │                              + AUDIT_WOULD_DENY   with enforcement
+  │                              + redact only if         │
+  │                                applyInAuditMode       │
+  │                                     │                 │
+  └─────────────────────────────────────┴─────────────────┘
+                        │
+                        ▼
+                 Return GuardDecision
 ```
 
 ### Rollout Stages
 
-```mermaid
-flowchart LR
-    A[stage_a_audit] -->|"All violations audit-only"| B[stage_b_high_risk_enforce]
-    B -->|"message_sending: always enforce<br/>before_tool_call: enforce if highRiskTools<br/>others: audit-only"| C[stage_c_full_enforce]
-    C -->|"All violations enforced"| D[Production]
+```
+stage_a_audit ──────────────────► stage_b_high_risk_enforce ──────────► stage_c_full_enforce ──► Production
+  All violations                    message_sending: always enforce       All violations
+  audit-only                        before_tool_call: enforce if           enforced
+                                      highRiskTools
+                                    others: audit-only
 ```
 
 ## Security Features
@@ -234,71 +225,62 @@ flowchart LR
 
 ### Owner Approval Workflow
 
-```mermaid
-sequenceDiagram
-    participant Agent as Agent / Caller
-    participant ENG as GuardrailsEngine
-    participant D6 as Principal Authz
-    participant D7 as Owner Approval
-    participant AB as ApprovalBroker
-    participant AS as ApprovalStore
-    participant NS as NotificationSink
-    participant Owner as Owner / Admin
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Phase 1: Challenge                                                      │
+│                                                                         │
+│  Agent ──► Engine: before_tool_call (restricted tool, member role)       │
+│    Engine ──► D6 Principal Authz: evaluateAuthorization()               │
+│    D6 ◄──── approvalRequirement (requiredRole, reason)                  │
+│    Engine ──► D7 Owner Approval: detectOwnerApproval(requirement)       │
+│      D7 ──► ApprovalBroker: createChallenge(toolName, args, requesterId)│
+│        ApprovalBroker: requestId = randomUUID()                         │
+│        ApprovalBroker: actionDigest = SHA-256({toolName, args, ...})    │
+│        ApprovalBroker ──► ApprovalStore: save(record, expiresAt)        │
+│        ApprovalBroker ──► NotificationSink: notify({requestId, ...})    │
+│      D7 ◄── { requestId, expiresAt, requiredRole }                     │
+│    Engine ◄── DENY + approvalChallenge                                  │
+│  Agent ◄── DENY with approvalChallenge.requestId                        │
+└─────────────────────────────────────────────────────────────────────────┘
 
-    rect rgb(255, 248, 240)
-    Note over Agent,Owner: Phase 1: Challenge
-    Agent->>ENG: before_tool_call (restricted tool, member role)
-    ENG->>D6: evaluateAuthorization()
-    D6-->>ENG: approvalRequirement (requiredRole, reason)
-    ENG->>D7: detectOwnerApproval(requirement)
-    D7->>AB: createChallenge(toolName, args, requesterId)
-    AB->>AB: requestId = randomUUID()
-    AB->>AB: actionDigest = SHA-256({ toolName, args, conversationId, ... })
-    AB->>AS: save(record with expiresAt = now + TTL)
-    AB->>NS: notify({ requestId, toolName, reason, expiresAt })
-    AB-->>D7: { requestId, expiresAt, requiredRole }
-    D7-->>ENG: DENY + approvalChallenge
-    ENG-->>Agent: DENY with approvalChallenge.requestId
-    end
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Phase 2: Approval                                                       │
+│                                                                         │
+│  Owner ──► Engine: /approve <requestId>                                 │
+│    Engine ──► ApprovalBroker: approveRequest(requestId, ownerId, "owner")│
+│      ApprovalBroker ──► ApprovalStore: lookup(requestId)                │
+│      ApprovalBroker: Verify not expired, role sufficient, not self      │
+│      ApprovalBroker: Check quorum (approverIds.length >= ownerQuorum?) │
+│      ApprovalBroker: Generate token: apr_<uuid>                        │
+│      ApprovalBroker ──► ApprovalStore: setToken(requestId, token)      │
+│    Engine ◄── token string                                              │
+│  Owner ◄── "Approved. Token: apr_..."                                   │
+└─────────────────────────────────────────────────────────────────────────┘
 
-    rect rgb(240, 255, 240)
-    Note over Agent,Owner: Phase 2: Approval
-    Owner->>ENG: /approve <requestId>
-    ENG->>AB: approveRequest(requestId, ownerId, "owner")
-    AB->>AS: lookup(requestId)
-    AB->>AB: Verify: not expired, role sufficient, not self-approval
-    AB->>AB: Check quorum (approverIds.length >= ownerQuorum?)
-    AB->>AB: Generate token: apr_<uuid>
-    AB->>AS: setToken(requestId, token)
-    AB-->>ENG: token string
-    ENG-->>Owner: "Approved. Token: apr_..."
-    end
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Phase 3: Redemption                                                     │
+│                                                                         │
+│  Agent ──► Engine: before_tool_call (same tool + approval.token)        │
+│    Engine ──► D7: detectOwnerApproval(requirement)                      │
+│      D7 ──► ApprovalBroker: verifyAndConsumeToken(token)               │
+│        Verify: not expired, not used, conversation match                │
+│        Verify: action digest match (same tool + args)                   │
+│        ApprovalStore: markUsed(requestId)                               │
+│      D7 ◄── "valid"                                                    │
+│    Engine ◄── no hits (ALLOW)                                           │
+│  Agent ◄── ALLOW                                                        │
+└─────────────────────────────────────────────────────────────────────────┘
 
-    rect rgb(240, 248, 255)
-    Note over Agent,Owner: Phase 3: Redemption
-    Agent->>ENG: before_tool_call (same tool + metadata.approval.token)
-    ENG->>D6: evaluateAuthorization() → approvalRequirement
-    ENG->>D7: detectOwnerApproval(requirement)
-    D7->>AB: verifyAndConsumeToken(token)
-    AB->>AS: lookup by token
-    AB->>AB: Verify: not expired, not used, conversation match
-    AB->>AB: Verify: action digest match (same tool + args)
-    AB->>AS: markUsed(requestId)
-    AB-->>D7: "valid"
-    D7-->>ENG: no hits (ALLOW)
-    ENG-->>Agent: ALLOW
-    end
-
-    rect rgb(255, 240, 240)
-    Note over Agent,Owner: Replay Prevention
-    Agent->>ENG: before_tool_call (same token again)
-    ENG->>D7: detectOwnerApproval(requirement)
-    D7->>AB: verifyAndConsumeToken(token)
-    AB->>AB: Token already has usedAt timestamp
-    AB-->>D7: "replayed"
-    D7-->>ENG: DENY (OWNER_APPROVAL_REPLAYED)
-    ENG-->>Agent: DENY
-    end
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Replay Prevention                                                       │
+│                                                                         │
+│  Agent ──► Engine: before_tool_call (same token again)                  │
+│    D7 ──► ApprovalBroker: verifyAndConsumeToken(token)                 │
+│      Token already has usedAt timestamp                                 │
+│    D7 ◄── "replayed"                                                   │
+│    Engine ◄── DENY (OWNER_APPROVAL_REPLAYED)                           │
+│  Agent ◄── DENY                                                        │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Approval verification checks** (in order):
@@ -312,55 +294,47 @@ sequenceDiagram
 
 ### Outbound Guard (System Prompt Leak Prevention)
 
-```mermaid
-sequenceDiagram
-    participant Agent as Agent
-    participant ADP as Adapter
-    participant ENG as Engine
-    participant D10 as Output Safety
-
-    Agent->>ADP: message_sending(context)
-    ADP->>ADP: extractOutboundContent()
-    Note over ADP: Scans ALL string fields<br/>(not just "content")
-    ADP->>ENG: evaluate(guardEvent, "message_sending")
-    ENG->>D10: Check leak patterns + injected filenames
-    alt System prompt content detected
-        D10-->>ENG: DENY (SYSTEM_PROMPT_LEAK, weight 0.95)
-        ENG-->>ADP: DENY
-        ADP-->>Agent: { cancel: true }
-    else Suspicious patterns (script tags, tokens)
-        D10-->>ENG: REDACT (UNTRUSTED_OUTPUT, weight 0.55)
-        ENG-->>ADP: REDACT with sanitized content
-        ADP-->>Agent: { content: redactedContent }
-    else Clean
-        D10-->>ENG: no hits
-        ENG-->>ADP: ALLOW
-        ADP-->>Agent: {}
-    end
+```
+Agent ──► Adapter: message_sending(context)
+  │
+  │  extractOutboundContent()
+  │  (scans ALL string fields, not just "content")
+  │
+  ▼
+Adapter ──► Engine: evaluate(guardEvent, "message_sending")
+  │
+  ▼
+Engine ──► D10 Output Safety: check leak patterns + injected filenames
+  │
+  ├── System prompt content detected:
+  │     D10 → DENY (SYSTEM_PROMPT_LEAK, weight 0.95)
+  │     Agent ◄── { cancel: true }
+  │
+  ├── Suspicious patterns (script tags, tokens):
+  │     D10 → REDACT (UNTRUSTED_OUTPUT, weight 0.55)
+  │     Agent ◄── { content: redactedContent }
+  │
+  └── Clean:
+        D10 → no hits → ALLOW
+        Agent ◄── {}
 ```
 
 ### `tool_result_persist` — Split Sync/Async Strategy
 
 This hook is synchronous in OpenClaw but the engine is async. The adapter splits the work:
 
-```mermaid
-sequenceDiagram
-    participant OC as OpenClaw (sync)
-    participant EXT as Extension
-    participant ADP as Adapter (async)
-    participant AUDIT as Audit Sink
-
-    OC->>EXT: tool_result_persist(event, ctx)
-
-    par Sync path (returns to OpenClaw)
-        EXT->>EXT: redactWithPatterns(content, precompiled patterns)
-        EXT-->>OC: { message: { content: redacted } } or {}
-    and Async path (fire-and-forget)
-        EXT->>ADP: hooks.tool_result_persist(oclCtx)
-        ADP->>ADP: engine.evaluate() + metrics
-        ADP->>AUDIT: auditSink.append()
-        Note over ADP: Promise .catch() logs errors
-    end
+```
+OpenClaw (sync) ──► Extension: tool_result_persist(event, ctx)
+  │
+  ├── [Sync path — returns to OpenClaw immediately]
+  │     Extension: redactWithPatterns(content, precompiled patterns)
+  │     OpenClaw ◄── { message: { content: redacted } } or {}
+  │
+  └── [Async path — fire-and-forget]
+        Extension ──► Adapter: hooks.tool_result_persist(oclCtx)
+          Adapter: engine.evaluate() + metrics
+          Adapter ──► AuditSink: auditSink.append()
+          (Promise .catch() logs errors)
 ```
 
 ### Reason Code Sanitization
@@ -380,11 +354,11 @@ All other reason codes pass through unchanged.
 
 Sensitive data, restricted info, and output safety detectors produce redacted content in a priority chain:
 
-```mermaid
-flowchart LR
-    D8[D8: Sensitive Data<br/>secrets → PII] -->|redactedContent| D9[D9: Restricted Info<br/>data-class policy]
-    D9 -->|redactedContent| D10[D10: Output Safety<br/>leak patterns]
-    D10 -->|Final redactedContent| R[Engine picks:<br/>D10 > D9 > D8]
+```
+D8: Sensitive Data ──► D9: Restricted Info ──► D10: Output Safety ──► Engine picks:
+  (secrets → PII)       (data-class policy)     (leak patterns)        D10 > D9 > D8
+       │                       │                       │
+       └── redactedContent ──► └── redactedContent ──► └── Final redactedContent
 ```
 
 ## Architecture
