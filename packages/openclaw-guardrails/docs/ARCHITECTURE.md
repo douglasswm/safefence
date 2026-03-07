@@ -9,6 +9,9 @@ Detailed technical documentation for `@safefence/openclaw-guardrails`.
 - Monotonic precedence: `DENY > REDACT > ALLOW`.
 - No runtime dependency on remote inference or policy services.
 - Zero runtime dependencies — uses only Node.js built-ins (`fetch()`, `fs`).
+- Dual-authorization RBAC: effective permission = user roles ∩ bot capabilities.
+- Persistent SQLite store for roles, bot instances, and hash-chained audit log.
+- Backward-compatible: falls back to config-based `ownerIds`/`adminIds` when RBAC store is not enabled.
 - Audit mode still applies redaction by default.
 
 ## Plugin ↔ Engine Flow
@@ -26,6 +29,7 @@ openclaw-extension.ts ──► api.on(hookName, handler)
   ▼
 openclaw-adapter.ts
   │  toEvent(phase, ctx) → GuardEvent
+  │  RoleStore.checkPermission() → dual-auth gate
   │
   ▼
 GuardrailsEngine ──► engine.evaluate(guardEvent, phase)
@@ -128,7 +132,7 @@ Engine.evaluate()
   │        (async DNS, before_tool_call only)
   ├──► D5  Provenance ── supply chain trust + retrieval trust ──► hits[]
   │        (async, before_tool_call only)
-  ├──► D6  Principal Authz ── identity, RBAC, mention-gating ──► hits[] + approvalRequirement?
+  ├──► D6  Principal Authz ── dual-auth (user RBAC ∩ bot caps), mention-gating ──► hits[] + approvalRequirement?
   │        (anti-spoofing: owner/admin derived from config only)
   ├──► D7  Owner Approval ── challenge/verify approval token ──► hits[] + approvalChallenge?
   │        (only runs if D6 returned approvalRequirement)
@@ -156,7 +160,7 @@ Engine.evaluate()
 | 3 | Path Canonical | `before_tool_call` | Path traversal patterns, workspace boundary (realpath), symlink traversal | DENY | 0.9–0.95 |
 | 4 | Network Egress | `before_tool_call` | Host allowlist, private/local IP blocking, DNS resolution, egress tool detection | DENY | 0.7–0.9 |
 | 5 | Provenance | `before_tool_call` | Skill source trust, hash integrity, retrieval trust level, signed source | DENY | 0.7–0.85 |
-| 6 | Principal Authz | All | Identity resolution, role-based tool policy, mention-gating, group channel enforcement, data-class restrictions | DENY | 0.7–0.95 |
+| 6 | Principal Authz | All | Dual-authorization check (user RBAC ∩ bot capabilities via RoleStore), identity resolution, mention-gating, group channel enforcement, data-class restrictions | DENY | 0.7–0.95 |
 | 7 | Owner Approval | Conditional | Challenge creation, token verification (TTL, digest, conversation, replay) | DENY | 0.8–0.9 |
 | 8 | Sensitive Data | All | Secret patterns (AWS keys, GitHub PATs, PEM keys, etc.), PII patterns (emails, SSNs, credit cards) | REDACT | 0.5–0.7 |
 | 9 | Restricted Info | `message_received`, `tool_result_persist`, `message_sending` | Data-class policy for non-owner principals, cross-principal redaction | DENY/REDACT | 0.7–0.9 |
@@ -192,6 +196,75 @@ decision = ALLOW                                 │      │
                         ▼
                  Return GuardDecision
 ```
+
+## Dual-Authorization Model
+
+When `rbacStore.enabled` is true, the principal authorization detector (D6) uses the persistent RoleStore instead of config-based role inference. Every request goes through dual authorization:
+
+```
+Human A: "@Bot-B delete file X" in Group G
+                    │
+         ┌──────────▼──────────┐
+         │ 1. Identify entities │
+         │    sender → user_id  │
+         │    bot → bot_instance│
+         │    channel → project │
+         └──────────┬──────────┘
+                    │
+         ┌──────────▼──────────┐
+         │ 2. Bot access policy │
+         │    owner_only?       │
+         │    project_members?  │
+         │    explicit?         │
+         └──────────┬──────────┘
+                    │
+         ┌──────────▼──────────┐
+         │ 3. User RBAC        │
+         │    role_assignments  │
+         │    → deny-overrides  │
+         └──────────┬──────────┘
+                    │
+         ┌──────────▼──────────┐
+         │ 4. Bot capabilities  │
+         │    capability ceiling│
+         │    (default: allow)  │
+         └──────────┬──────────┘
+                    │
+         ┌──────────▼──────────┐
+         │ 5. Intersection     │
+         │    user ∩ bot = eff. │
+         └──────────┬──────────┘
+                    │
+         ┌──────────▼──────────┐
+         │ 6. Audit log        │
+         │    hash-chained     │
+         │    (separate DB)    │
+         └──────────┬──────────┘
+                    │
+                    ▼
+         Guardrails pipeline
+         (12 detectors, unchanged)
+```
+
+### Permission Categories
+
+| Category | Actions | Description |
+|----------|---------|-------------|
+| `tool_use` | `read`, `write`, `exec`, `apply_patch`, `skills_install`, `*` | Tool execution permissions |
+| `guardrail` | `enforce`, `audit_only`, `bypass`, `configure` | Guardrail enforcement level |
+| `data_access` | `public`, `internal`, `restricted`, `secret` | Data classification access |
+| `budget` | `view`, `unlimited` | Usage and rate limit controls |
+| `admin` | `role_manage`, `role_assign`, `project_manage`, `channel_manage`, `team_manage`, `bot_manage` | Administration permissions |
+| `approval` | `approve`, `request` | Approval workflow permissions |
+
+### Security Invariants
+
+- **Deny-overrides**: within user RBAC, if any role denies a permission, it's denied regardless of other roles.
+- **Bot capability ceiling**: bot owner can restrict capabilities; this ceiling applies to ALL users of that bot.
+- **Access policy enforcement**: `owner_only` / `project_members` / `explicit` control who can use a bot.
+- **Last-superadmin protection**: cannot revoke the last superadmin role assignment in a project.
+- **Audit tamper-evidence**: SHA-256 hash chain on every record; SQLite triggers prevent UPDATE/DELETE.
+- **Fail-closed**: store error → ConfigRoleStore fallback → engine `failClosed: true`.
 
 ## Rollout Stages
 
@@ -375,6 +448,12 @@ src/
 │   ├── path-canonical.ts             # Path canonicalization + symlink checks
 │   ├── retrieval-trust.ts            # Retrieval trust level evaluation
 │   ├── supply-chain.ts               # Skill source + hash policy
+│   ├── role-store.ts                    # RoleStore interface (dual-auth)
+│   ├── config-role-store.ts             # Config-based adapter (backward compat)
+│   ├── sqlite-role-store.ts             # SQLite RBAC implementation
+│   ├── audit-store.ts                   # Hash-chained audit log (separate DB)
+│   ├── sqlite-types.ts                  # SQLite type definitions
+│   ├── permissions.ts                   # Tool-to-permission mapping
 │   └── detectors/                    # Security detector modules
 │       ├── index.ts                  # Detector exports
 │       ├── types.ts                  # Detector type definitions
@@ -397,9 +476,16 @@ src/
 │   └── openclaw-extension.ts         # Plugin entry point (api.on() typed hooks)
 ├── redaction/
 │   └── redact.ts                     # Secret/PII redaction engine (cached regex)
-└── rules/
-    ├── default-policy.ts             # Default config factory + merge
-    └── patterns.ts                   # Detection pattern definitions
+├── rules/
+│   ├── default-policy.ts             # Default config factory + merge
+│   └── patterns.ts                   # Detection pattern definitions
+├── utils/
+│   └── args.ts                          # CLI flag extraction utility
+├── admin/
+│   ├── server.ts                        # HTTP admin API server
+│   └── routes.ts                        # REST route handlers
+└── cli/
+    └── index.ts                         # CLI tool (safefence binary)
 ```
 
 ## Provenance

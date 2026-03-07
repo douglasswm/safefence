@@ -24,7 +24,10 @@ A deterministic security plugin for OpenClaw agents — no remote inference, zer
 - Monotonic precedence: `DENY > REDACT > ALLOW`.
 
 ### Identity and Access Control
-- Principal-aware authorization (`owner/admin/member/unknown`) with anti-spoofing.
+- Dual-authorization model (user RBAC ∩ bot capabilities) with anti-spoofing.
+- Persistent RBAC store (SQLite) with per-user, per-bot, per-channel role assignments.
+- Bot instances as first-class entities with capability ceilings and access policies.
+- Bot commands (`/sf`), HTTP admin API, and CLI for dynamic role management without restart.
 - Group-aware mention-gating and role-based tool policy.
 - Owner-approval workflow with TTL, anti-replay, conversation binding, and optional persistence.
 - Admin notification bridge for approval workflow alerts.
@@ -34,12 +37,13 @@ A deterministic security plugin for OpenClaw agents — no remote inference, zer
 - Custom business rule validators for domain-specific logic.
 - Optional external HTTP validators with circuit breaker (e.g. Guardrails AI).
 - Per-user token usage tracking with JSONL persistence.
+- Hash-chained, tamper-evident RBAC audit log (separate SQLite DB) for authorization decisions and admin mutations.
 
 ### Operational Controls
 - Staged rollout (`stage_a_audit`, `stage_b_high_risk_enforce`, `stage_c_full_enforce`).
 - Runtime monitoring snapshot with false-positive threshold signaling.
 - Fail-closed by default.
-- 112 tests across 19 test files at ~85% line coverage.
+- 144 tests across 20 test files at ~85% line coverage.
 
 ## How It Works
 
@@ -60,6 +64,8 @@ sequenceDiagram
     OC->>EXT: message_received(event, ctx)
     EXT->>ADP: hooks.message_received(oclCtx)
     ADP->>ADP: toEvent("message_received", ctx)
+    ADP->>ADP: Dual-auth check (user RBAC ∩ bot caps)
+    Note over ADP: If RBAC denies, request never reaches detectors
     ADP->>ENG: engine.evaluate(guardEvent, phase)
     ENG->>DET: Run 12 detectors sequentially
     DET-->>ENG: RuleHit[]
@@ -123,7 +129,7 @@ sequenceDiagram
     D4-->>ENG: hits[] (async: DNS resolve)
     ENG->>D5: supply chain + retrieval trust
     D5-->>ENG: hits[] (async)
-    ENG->>D6: identity resolution, RBAC, mention-gating
+    ENG->>D6: dual-auth (user RBAC ∩ bot caps), mention-gating
     D6-->>ENG: hits[] + approvalRequirement?
     ENG->>D7: challenge/verify approval token
     Note over D7: Only if D6 returned approvalRequirement

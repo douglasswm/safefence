@@ -5,7 +5,7 @@
 
 > **Experimental** -- This project is under active development and not yet production-ready. APIs, config schemas, and behavior may change without notice between releases.
 
-Native TypeScript security kernel for OpenClaw (`>=2026.2.25`) with deterministic local enforcement, principal-aware authorization, and owner approval for group/multi-user safety.
+Native TypeScript security kernel for OpenClaw (`>=2026.2.25`) with deterministic local enforcement, principal-aware authorization, dual-authorization RBAC, and owner approval for group/multi-user safety.
 
 ## Install
 
@@ -83,15 +83,71 @@ const spendingLimit: CustomValidator = {
 const engine = new GuardrailsEngine(config, { customValidators: [spendingLimit] });
 ```
 
+### RBAC Store (Dual Authorization)
+
+```ts
+// Enable the persistent RBAC store in config
+const config = {
+  // ... existing config ...
+  rbacStore: {
+    enabled: true,
+    dbPath: ".safefence/rbac.db",
+    auditDbPath: ".safefence/audit.db",
+    seedFromConfig: true,    // auto-import ownerIds/adminIds
+    botPlatformId: "bot-123" // this bot's platform ID
+  }
+};
+
+// Or use the SqliteRoleStore directly
+import { SqliteRoleStore } from "@safefence/openclaw-guardrails";
+
+const store = new SqliteRoleStore(config);
+store.registerBot("project-1", "owner-user", "telegram", "bot-123", "My Bot");
+store.createRole("project-1", "moderator", [
+  { permissionId: "tool_use:read", effect: "allow" },
+  { permissionId: "tool_use:write", effect: "allow" },
+]);
+// Effective permissions = user RBAC ∩ bot capabilities
+const perms = store.resolveEffective({
+  senderPlatform: "telegram",
+  senderId: "user-456",
+  botPlatform: "telegram",
+  botPlatformId: "bot-123"
+});
+```
+
+### Bot Commands
+
+When the RBAC store is enabled, the plugin registers `/sf` commands:
+
+- `/sf role create|delete|list|permissions|grant-perm|revoke-perm` — manage roles
+- `/sf assign|revoke|who` — manage role assignments
+- `/sf bot register|cap|access|list` — manage bot instances
+- `/sf channel link|unlink` — link IM channels to projects
+- `/sf audit` — query the audit log
+
+### HTTP Admin API
+
+```ts
+import { createAdminServer } from "@safefence/openclaw-guardrails";
+
+const server = createAdminServer({
+  store,       // SqliteRoleStore instance
+  port: 18790, // default
+  apiKey: "your-api-key"
+});
+// REST API at http://localhost:18790/api/v1/...
+```
+
 ## Exports
 
-**Types**: `ApproverRole`, `ChannelType`, `DataClass`, `Decision`, `PrincipalContext`, `PrincipalRole`, `RolloutStage`, `GuardDecision`, `GuardEvent`, `GuardrailsConfig`, `Phase`, `TokenUsageSummary`, `AuditEvent`, `AuditSink`, `CustomValidator`, `CustomValidatorContext`, `NotificationSink`, `ApprovalNotification`, `TokenUsageRecord`, `EngineOptions`, `PluginOptions`.
+**Types**: `ApproverRole`, `ChannelType`, `DataClass`, `Decision`, `PrincipalContext`, `PrincipalRole`, `RolloutStage`, `GuardDecision`, `GuardEvent`, `GuardrailsConfig`, `Phase`, `TokenUsageSummary`, `AuditEvent`, `AuditSink`, `CustomValidator`, `CustomValidatorContext`, `NotificationSink`, `ApprovalNotification`, `TokenUsageRecord`, `EngineOptions`, `PluginOptions`, `AuditEntry`, `AuditEventType`, `BotInstance`, `DeniedBy`, `DualAuthContext`, `EffectivePermissions`, `PermissionCheck`, `RbacRole`, `RbacRoleAssignment`, `RbacStoreConfig`, `RoleStore`, `AdminServerOptions`.
 
-**Constants**: `REASON_CODES`, `UNKNOWN_SENDER`, `UNKNOWN_CONVERSATION`.
+**Constants**: `REASON_CODES`, `UNKNOWN_SENDER`, `UNKNOWN_CONVERSATION`, `AUDIT_EVENT_TYPES`.
 
-**Classes**: `GuardrailsEngine`, `JsonlAuditSink`, `NoopAuditSink`, `ConsoleNotificationSink`, `CallbackNotificationSink`, `NoopNotificationSink`, `TokenUsageStore`.
+**Classes**: `GuardrailsEngine`, `JsonlAuditSink`, `NoopAuditSink`, `ConsoleNotificationSink`, `CallbackNotificationSink`, `NoopNotificationSink`, `TokenUsageStore`, `ConfigRoleStore`, `SqliteRoleStore`, `AuditStore`.
 
-**Config helpers**: `createDefaultConfig()`, `mergeConfig(base, overrides)`.
+**Config helpers**: `createDefaultConfig()`, `mergeConfig(base, overrides)`, `createAdminServer()`.
 
 ## Limitations
 
@@ -100,6 +156,7 @@ const engine = new GuardrailsEngine(config, { customValidators: [spendingLimit] 
 - Retrieval trust still depends on upstream metadata quality.
 - External validator circuit breaker state is module-scoped (shared across engine instances in the same process).
 - Token usage `records` array grows unboundedly in memory for long-running processes. Use JSONL persistence and restart periodically for high-volume deployments.
+- RBAC store requires `better-sqlite3` as an optional peer dependency. Without it, the system falls back to config-based authorization.
 
 ## Further Reading
 

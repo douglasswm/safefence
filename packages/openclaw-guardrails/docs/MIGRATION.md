@@ -1,5 +1,27 @@
 # Migration Guide
 
+## v0.6.5 → v0.7.0
+
+1. **Dual-authorization RBAC store**: New persistent SQLite-backed RBAC system. Enable via `rbacStore.enabled: true` in config. When disabled (default), behavior is identical to previous versions — no breaking changes.
+
+2. **New `DualAuthContext` interface**: `RoleStore.resolveEffective()` and `checkPermission()` now accept a single `DualAuthContext` object instead of 5 positional parameters. This only affects users who import and call `RoleStore` directly.
+
+3. **New types exported**: `DualAuthContext`, `DeniedBy`, `AuditEventType`, `AuditEntry`, `BotInstance`, `EffectivePermissions`, `PermissionCheck`, `RbacRole`, `RbacRoleAssignment`, `RbacStoreConfig`, `RoleStore`. New constant: `AUDIT_EVENT_TYPES`.
+
+4. **New classes exported**: `SqliteRoleStore`, `ConfigRoleStore`, `AuditStore`.
+
+5. **New peer dependency**: `better-sqlite3` (optional). Only required when `rbacStore.enabled: true`. Install with `npm install better-sqlite3`.
+
+6. **Bot commands**: When RBAC store is enabled, the plugin registers `/sf` commands for role management, bot configuration, and audit queries. These commands require appropriate permissions (e.g., `admin:role_manage`).
+
+7. **HTTP admin API**: Optional REST API server created via `createAdminServer()`. Requires `rbacStore.apiKey` for authentication.
+
+8. **CLI tool**: New `safefence` binary for direct SQLite management. Added to `package.json` `bin` field.
+
+9. **Audit logging**: RBAC decisions and admin mutations are logged to a separate hash-chained SQLite audit log (`audit.db`). Existing JSONL audit sink continues unchanged for guardrail content-safety events.
+
+10. **Test count**: 144 tests across 20 test files (up from 112 across 19).
+
 ## v0.6.0 → v0.6.1
 
 1. **Plugin API alignment**: The plugin now uses OpenClaw's typed hook system (`api.on()`) instead of `api.registerHook()`. Security decisions (block, cancel, redact) are now properly honoured by OpenClaw's pipeline — previously they were silently discarded.

@@ -67,3 +67,11 @@ Full configuration options for `@safefence/openclaw-guardrails`.
 | `budgetPersistence` | `storagePath` | `string?` | — | JSONL path for usage persistence |
 | `notifications` | `enabled` | `boolean` | `false` | Enable approval notifications |
 | `notifications` | `adminChannelId` | `string?` | — | Target channel for notifications |
+| `rbacStore` | `enabled` | `boolean` | `false` | Enable persistent RBAC store with dual authorization |
+| `rbacStore` | `dbPath` | `string?` | `".safefence/rbac.db"` | SQLite database path for RBAC data |
+| `rbacStore` | `auditDbPath` | `string?` | `".safefence/audit.db"` | Separate SQLite path for audit log |
+| `rbacStore` | `auditRotation` | `"monthly" \| "quarterly" \| "off"` | `"monthly"` | Audit log file rotation policy |
+| `rbacStore` | `seedFromConfig` | `boolean` | `false` | Auto-import ownerIds/adminIds as superadmin roles on first run |
+| `rbacStore` | `botPlatformId` | `string?` | — | This bot's platform ID for self-identification |
+| `rbacStore` | `apiKey` | `string?` | — | Bearer token for HTTP admin API authentication |
+| `rbacStore` | `apiPort` | `number?` | `18790` | Port for HTTP admin API server |
