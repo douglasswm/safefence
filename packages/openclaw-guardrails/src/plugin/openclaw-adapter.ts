@@ -8,6 +8,7 @@ import { REASON_CODES } from "../core/reason-codes.js";
 import { TokenUsageStore } from "../core/token-usage-store.js";
 import { PLUGIN_VERSION } from "./version.js";
 import { createDefaultConfig, mergeConfig } from "../rules/default-policy.js";
+import type { RoleStore } from "../core/role-store.js";
 import type {
   ApproverRole,
   ChannelType,
@@ -416,15 +417,18 @@ function buildMonitoringSnapshot(config: GuardrailsConfig, metrics: Metrics) {
 
 export interface PluginOptions {
   config?: Partial<GuardrailsConfig>;
+  /** Pre-merged config — skips internal mergeConfig if provided. */
+  mergedConfig?: GuardrailsConfig;
   auditSink?: AuditSink;
   notificationSink?: NotificationSink;
+  roleStore?: RoleStore;
 }
 
 function isPluginOptions(arg: unknown): arg is PluginOptions {
   if (!isObject(arg)) return false;
   const obj = arg;
   // PluginOptions has keys that never appear on GuardrailsConfig
-  return "auditSink" in obj || "notificationSink" in obj ||
+  return "auditSink" in obj || "notificationSink" in obj || "mergedConfig" in obj ||
     ("config" in obj && (obj.config === undefined || (typeof obj.config === "object" && obj.config !== null)));
 }
 
@@ -432,12 +436,17 @@ export function createOpenClawGuardrailsPlugin(
   overridesOrOptions: Partial<GuardrailsConfig> | PluginOptions = {}
 ): OpenClawPlugin {
   const pluginOpts = isPluginOptions(overridesOrOptions) ? overridesOrOptions : {};
-  const overrides: Partial<GuardrailsConfig> = isPluginOptions(overridesOrOptions)
-    ? overridesOrOptions.config ?? {}
-    : overridesOrOptions;
 
-  const workspaceRoot = overrides.workspaceRoot ?? process.cwd();
-  const config = mergeConfig(createDefaultConfig(workspaceRoot), overrides);
+  let config: GuardrailsConfig;
+  if (pluginOpts.mergedConfig) {
+    config = pluginOpts.mergedConfig;
+  } else {
+    const overrides: Partial<GuardrailsConfig> = isPluginOptions(overridesOrOptions)
+      ? overridesOrOptions.config ?? {}
+      : overridesOrOptions;
+    const workspaceRoot = overrides.workspaceRoot ?? process.cwd();
+    config = mergeConfig(createDefaultConfig(workspaceRoot), overrides);
+  }
 
   // Audit sink (M1)
   const auditSink: AuditSink = pluginOpts.auditSink
@@ -457,7 +466,8 @@ export function createOpenClawGuardrailsPlugin(
   const engine = new GuardrailsEngine(config, {
     auditSink,
     tokenUsageStore,
-    notificationSink
+    notificationSink,
+    roleStore: pluginOpts.roleStore
   });
   const metrics = createMetrics();
 

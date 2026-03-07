@@ -111,9 +111,12 @@ describe("distribution contract", () => {
     expect(hookNames).toContain("message_sending");
     expect(hookNames).toContain("agent_end");
 
-    expect(registeredCommands.length).toBe(1);
-    expect(registeredCommands[0].name).toBe("approve");
-    expect(registeredCommands[0].requireAuth).toBe(true);
+    expect(registeredCommands.length).toBe(2);
+    const approveCmd = registeredCommands.find((c) => c.name === "approve");
+    expect(approveCmd).toBeDefined();
+    expect(approveCmd!.requireAuth).toBe(true);
+    const sfCmd = registeredCommands.find((c) => c.name === "sf");
+    expect(sfCmd).toBeDefined();
   });
 
   it("before_agent_start hook returns prependSystemContext with security policy", async () => {

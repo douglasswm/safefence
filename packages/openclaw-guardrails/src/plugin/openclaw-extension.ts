@@ -8,8 +8,15 @@
  * - `api.registerCommand()` for the /approve command
  */
 
+import { randomUUID as generateUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import { ConfigRoleStore } from "../core/config-role-store.js";
+import { extractFlag } from "../utils/args.js";
+import type { RoleStore } from "../core/role-store.js";
 import type { GuardrailsConfig } from "../core/types.js";
 import { redactWithPatterns } from "../redaction/redact.js";
+import { createDefaultConfig, mergeConfig } from "../rules/default-policy.js";
 import { createOpenClawGuardrailsPlugin } from "./openclaw-adapter.js";
 import { PLUGIN_VERSION } from "./version.js";
 import {
@@ -94,7 +101,35 @@ const plugin = {
   register(api: PluginApi) {
     const rawConfig = (api.pluginConfig ?? {}) as Partial<GuardrailsConfig>;
     const log = api.logger;
-    const guardrails = createOpenClawGuardrailsPlugin(rawConfig);
+    const workspaceRoot = rawConfig.workspaceRoot ?? process.cwd();
+    const fullConfig = mergeConfig(createDefaultConfig(workspaceRoot), rawConfig);
+
+    // Initialize RoleStore based on config
+    let roleStore: RoleStore | undefined;
+    const rbacConfig = rawConfig.rbacStore;
+    if (rbacConfig?.enabled) {
+      try {
+        const { SqliteRoleStore } = require("../core/sqlite-role-store.js") as { SqliteRoleStore: new (dbPath: string, auditDbPath: string, config?: GuardrailsConfig) => RoleStore };
+        const dbPath = rbacConfig.dbPath ?? `${workspaceRoot}/.safefence/rbac.db`;
+        const auditDbPath = rbacConfig.auditDbPath ?? `${workspaceRoot}/.safefence/audit.db`;
+
+        // Ensure directory exists
+        mkdirSync(dirname(dbPath), { recursive: true });
+
+        roleStore = new SqliteRoleStore(dbPath, auditDbPath, fullConfig);
+        log.info(`[guardrails] RBAC store initialized (${dbPath})`);
+      } catch (err: unknown) {
+        log.warn(`[guardrails] Failed to initialize RBAC store, falling back to config: ${String(err)}`);
+        roleStore = undefined;
+      }
+    }
+
+    // If no SQLite store, use config-based fallback
+    if (!roleStore) {
+      roleStore = new ConfigRoleStore(fullConfig);
+    }
+
+    const guardrails = createOpenClawGuardrailsPlugin({ mergedConfig: fullConfig, roleStore });
     const mergedConfig = guardrails.config;
 
     log.info(`[guardrails] plugin registered (v${guardrails.version}, mode=${mergedConfig.mode})`);
@@ -240,7 +275,329 @@ const plugin = {
         return { text: `Approval failed for request ${requestId}. It may have expired or already been processed.` };
       },
     });
+
+    // ------------------------------------------------------------------
+    // /sf command — RBAC management commands
+    // ------------------------------------------------------------------
+    api.registerCommand({
+      name: "sf",
+      description: "SafeFence RBAC management commands",
+      acceptsArgs: true,
+      requireAuth: true,
+      handler: (ctx: PluginCommandContext) => {
+        return handleSfCommand(ctx, roleStore, mergedConfig, log);
+      },
+    });
   },
 };
+
+/** Commands that require specific admin permissions. */
+const COMMAND_PERMISSIONS: Record<string, { category: string; action: string }> = {
+  role: { category: "admin", action: "role_manage" },
+  assign: { category: "admin", action: "role_assign" },
+  revoke: { category: "admin", action: "role_assign" },
+  bot: { category: "admin", action: "bot_manage" },
+  channel: { category: "admin", action: "channel_manage" },
+};
+
+/** Read-only commands that only need the sender to be authorized. */
+const READ_ONLY_COMMANDS = new Set(["who", "audit", "help"]);
+
+function checkSfPermission(
+  senderId: string,
+  command: string,
+  config: GuardrailsConfig
+): string | null {
+  // Read-only commands only need the sender to be an authorized sender (owner/admin)
+  if (READ_ONLY_COMMANDS.has(command)) return null;
+
+  const requiredPerm = COMMAND_PERMISSIONS[command];
+  if (!requiredPerm) return null; // unknown commands will error later
+
+  // Check if sender is owner (has all permissions)
+  if (config.principal.ownerIds.includes(senderId)) return null;
+
+  // Check if sender is admin (limited permissions)
+  if (config.principal.adminIds.includes(senderId)) {
+    // Admins can assign roles but not manage roles/bots/channels
+    if (requiredPerm.action === "role_assign") return null;
+    return `Permission denied: ${requiredPerm.category}:${requiredPerm.action} requires owner access.`;
+  }
+
+  return `Permission denied: only owners and admins can use /sf ${command}.`;
+}
+
+function handleSfCommand(
+  ctx: PluginCommandContext,
+  store: RoleStore,
+  config: GuardrailsConfig,
+  log: PluginLogger
+): PluginCommandResult {
+  const body = (ctx.commandBody ?? ctx.args ?? "").trim();
+  const parts = body.split(/\s+/);
+  const sub = parts[0]?.toLowerCase();
+  const rest = parts.slice(1);
+
+  if (!sub) {
+    return { text: sfHelp() };
+  }
+
+  // Authorization check: sender must be owner/admin for management commands
+  const senderId = ctx.senderId ?? "unknown";
+  if (!ctx.isAuthorizedSender) {
+    return { text: "Permission denied: only authorized senders can use /sf commands." };
+  }
+
+  const permError = checkSfPermission(senderId, sub, config);
+  if (permError) {
+    return { text: permError };
+  }
+
+  try {
+    switch (sub) {
+      case "role": return handleRoleCommand(rest, store, ctx);
+      case "assign": return handleAssignCommand(rest, store, ctx);
+      case "revoke": return handleRevokeCommand(rest, store, ctx);
+      case "who": return handleWhoCommand(rest, store);
+      case "bot": return handleBotCommand(rest, store, ctx);
+      case "channel": return handleChannelCommand(rest, store, ctx);
+      case "audit": return handleAuditCommand(rest, store);
+      case "help": return { text: sfHelp() };
+      default: return { text: `Unknown command: ${sub}\n\n${sfHelp()}` };
+    }
+  } catch (err: unknown) {
+    log.error(`[guardrails:sf] command error: ${String(err)}`);
+    return { text: `Error: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+function sfHelp(): string {
+  return [
+    "SafeFence RBAC Commands:",
+    "  /sf role list|create|delete|permissions|grant-perm|revoke-perm",
+    "  /sf assign <userId> <roleName> [--project <id>]",
+    "  /sf revoke <assignmentId>",
+    "  /sf who <userId>",
+    "  /sf bot register|cap|access|list",
+    "  /sf channel link|unlink",
+    "  /sf audit [--bot <name>] [--limit N]",
+    "  /sf help",
+  ].join("\n");
+}
+
+function handleRoleCommand(args: string[], store: RoleStore, ctx: PluginCommandContext): PluginCommandResult {
+  const action = args[0]?.toLowerCase();
+  const projectId = extractFlag(args, "--project") ?? "default-project";
+
+  switch (action) {
+    case "list": {
+      const roles = store.listRoles(projectId);
+      if (roles.length === 0) return { text: "No roles found." };
+      const lines = roles.map((r) =>
+        `  ${r.name}${r.isSystem ? " (system)" : ""} — ${r.description ?? "no description"}`
+      );
+      return { text: `Roles in project ${projectId}:\n${lines.join("\n")}` };
+    }
+    case "create": {
+      const name = args[1];
+      if (!name) return { text: "Usage: /sf role create <name> [--description \"...\"]" };
+      const description = extractFlag(args, "--description");
+      const role = store.createRole(projectId, name, [], description ?? undefined, ctx.senderId);
+      return { text: `Role created: ${role.name} (${role.id})` };
+    }
+    case "delete": {
+      const name = args[1];
+      if (!name) return { text: "Usage: /sf role delete <name>" };
+      const roles = store.listRoles(projectId);
+      const role = roles.find((r) => r.name === name);
+      if (!role) return { text: `Role not found: ${name}` };
+      store.deleteRole(role.id);
+      return { text: `Role deleted: ${name}` };
+    }
+    case "permissions": {
+      const name = args[1];
+      if (!name) return { text: "Usage: /sf role permissions <name>" };
+      const roles = store.listRoles(projectId);
+      const role = roles.find((r) => r.name === name);
+      if (!role) return { text: `Role not found: ${name}` };
+      const perms = store.getRolePermissions(role.id);
+      if (perms.length === 0) return { text: `No permissions for role: ${name}` };
+      const lines = perms.map((p) => `  ${p.permissionId} (${p.effect})`);
+      return { text: `Permissions for ${name}:\n${lines.join("\n")}` };
+    }
+    case "grant-perm": {
+      const roleName = args[1];
+      const permId = args[2];
+      if (!roleName || !permId) return { text: "Usage: /sf role grant-perm <role> <category:action>" };
+      const roles = store.listRoles(projectId);
+      const role = roles.find((r) => r.name === roleName);
+      if (!role) return { text: `Role not found: ${roleName}` };
+      store.grantRolePermission(role.id, permId, "allow");
+      return { text: `Granted ${permId} to ${roleName}` };
+    }
+    case "revoke-perm": {
+      const roleName = args[1];
+      const permId = args[2];
+      if (!roleName || !permId) return { text: "Usage: /sf role revoke-perm <role> <category:action>" };
+      const roles = store.listRoles(projectId);
+      const role = roles.find((r) => r.name === roleName);
+      if (!role) return { text: `Role not found: ${roleName}` };
+      store.revokeRolePermission(role.id, permId);
+      return { text: `Revoked ${permId} from ${roleName}` };
+    }
+    default:
+      return { text: "Usage: /sf role list|create|delete|permissions|grant-perm|revoke-perm" };
+  }
+}
+
+function handleAssignCommand(args: string[], store: RoleStore, ctx: PluginCommandContext): PluginCommandResult {
+  const userId = args[0];
+  const roleName = args[1];
+  if (!userId || !roleName) return { text: "Usage: /sf assign <userId> <roleName> [--project <id>] [--bot <botId>]" };
+
+  const projectId = extractFlag(args, "--project") ?? "default-project";
+  const botId = extractFlag(args, "--bot");
+  const channelScope = args.includes("--channel");
+
+  const roles = store.listRoles(projectId);
+  const role = roles.find((r) => r.name === roleName);
+  if (!role) return { text: `Role not found: ${roleName}` };
+
+  store.ensureUser(userId);
+  const scopeType = channelScope ? "im_channel" as const : "project" as const;
+  const scopeId = channelScope ? (extractFlag(args, "--channel") ?? projectId) : projectId;
+
+  const assignment = store.assignRole(userId, role.id, scopeType, scopeId, botId ?? undefined, ctx.senderId);
+  return { text: `Assigned ${roleName} to ${userId} (${assignment.id})` };
+}
+
+function handleRevokeCommand(args: string[], store: RoleStore, _ctx: PluginCommandContext): PluginCommandResult {
+  const assignmentId = args[0];
+  if (!assignmentId) return { text: "Usage: /sf revoke <assignmentId>" };
+  store.revokeRole(assignmentId);
+  return { text: `Revoked assignment: ${assignmentId}` };
+}
+
+function handleWhoCommand(args: string[], store: RoleStore): PluginCommandResult {
+  const userId = args[0];
+  if (!userId) return { text: "Usage: /sf who <userId>" };
+
+  const assignments = store.getUserAssignments(userId);
+  if (assignments.length === 0) return { text: `No role assignments for: ${userId}` };
+
+  const lines = assignments.map((a) => {
+    const role = store.getRole(a.roleId);
+    const botInfo = a.botInstanceId ? ` (bot: ${a.botInstanceId})` : "";
+    const expiry = a.expiresAt ? ` expires: ${new Date(a.expiresAt).toISOString()}` : "";
+    return `  ${role?.name ?? a.roleId} @ ${a.scopeType}:${a.scopeId}${botInfo}${expiry}`;
+  });
+  return { text: `Roles for ${userId}:\n${lines.join("\n")}` };
+}
+
+function handleBotCommand(args: string[], store: RoleStore, ctx: PluginCommandContext): PluginCommandResult {
+  const action = args[0]?.toLowerCase();
+  const projectId = extractFlag(args, "--project") ?? "default-project";
+
+  switch (action) {
+    case "register": {
+      const name = args[1];
+      const platform = extractFlag(args, "--platform") ?? "unknown";
+      const botPlatformId = extractFlag(args, "--bot-id") ?? generateUUID();
+      const ownerId = ctx.senderId ?? "unknown";
+      store.ensureUser(ownerId);
+      const bot = store.registerBot(projectId, ownerId, platform, botPlatformId, name);
+      return { text: `Bot registered: ${bot.name ?? bot.id} (${bot.id})` };
+    }
+    case "cap": {
+      const subAction = args[1]?.toLowerCase();
+      if (subAction === "set") {
+        const permId = args[2];
+        const effect = args[3] as "allow" | "deny";
+        const botId = extractFlag(args, "--bot");
+        if (!botId || !permId || !effect) return { text: "Usage: /sf bot cap set <perm> allow|deny --bot <id>" };
+        store.setBotCapability(botId, permId, effect);
+        return { text: `Set ${permId} = ${effect} on bot ${botId}` };
+      }
+      if (subAction === "list") {
+        const botId = extractFlag(args, "--bot");
+        if (!botId) return { text: "Usage: /sf bot cap list --bot <id>" };
+        const caps = store.getBotCapabilities(botId);
+        if (caps.length === 0) return { text: "No explicit capabilities set (defaults to allow-all)." };
+        const lines = caps.map((c) => `  ${c.permissionId}: ${c.effect}`);
+        return { text: `Bot capabilities:\n${lines.join("\n")}` };
+      }
+      return { text: "Usage: /sf bot cap set|list" };
+    }
+    case "access": {
+      const policy = args[1] as "owner_only" | "project_members" | "explicit" | undefined;
+      const botId = extractFlag(args, "--bot");
+      if (!botId || !policy) return { text: "Usage: /sf bot access <policy> --bot <id>" };
+      store.setBotAccessPolicy(botId, policy);
+      return { text: `Set access policy to ${policy} on bot ${botId}` };
+    }
+    case "list": {
+      const bots = store.listBots(projectId);
+      if (bots.length === 0) return { text: "No bots registered." };
+      const lines = bots.map((b) =>
+        `  ${b.name ?? b.id} (${b.platform}:${b.platformBotId ?? "?"}) policy=${b.accessPolicy}`
+      );
+      return { text: `Bots in project ${projectId}:\n${lines.join("\n")}` };
+    }
+    default:
+      return { text: "Usage: /sf bot register|cap|access|list" };
+  }
+}
+
+function handleChannelCommand(args: string[], store: RoleStore, _ctx: PluginCommandContext): PluginCommandResult {
+  const action = args[0]?.toLowerCase();
+
+  switch (action) {
+    case "link": {
+      const projectId = args[1] ?? extractFlag(args, "--project") ?? "default-project";
+      const platform = extractFlag(args, "--platform") ?? "unknown";
+      const platformChannelId = extractFlag(args, "--channel-id") ?? generateUUID();
+      const displayName = extractFlag(args, "--name");
+      const channelId = generateUUID();
+      store.linkChannel(channelId, projectId, platform, platformChannelId, displayName ?? undefined);
+      return { text: `Channel linked: ${displayName ?? channelId} -> project ${projectId}` };
+    }
+    case "unlink": {
+      const platform = extractFlag(args, "--platform") ?? "unknown";
+      const platformChannelId = extractFlag(args, "--channel-id");
+      if (!platformChannelId) return { text: "Usage: /sf channel unlink --platform <p> --channel-id <id>" };
+      store.unlinkChannel(platform, platformChannelId);
+      return { text: `Channel unlinked: ${platform}:${platformChannelId}` };
+    }
+    default:
+      return { text: "Usage: /sf channel link|unlink" };
+  }
+}
+
+function handleAuditCommand(args: string[], store: RoleStore): PluginCommandResult {
+  const botId = extractFlag(args, "--bot");
+  const userId = extractFlag(args, "--user");
+  const eventType = extractFlag(args, "--type");
+  const limitStr = extractFlag(args, "--limit");
+  const limit = limitStr ? parseInt(limitStr, 10) : 20;
+
+  const entries = store.queryAudit({
+    botInstanceId: botId ?? undefined,
+    actorUserId: userId ?? undefined,
+    eventType: eventType ?? undefined,
+    limit,
+  });
+
+  if (entries.length === 0) return { text: "No audit entries found." };
+
+  const lines = entries.map((e) => {
+    const time = new Date(e.timestamp).toISOString();
+    const perm = e.permissionCategory ? `${e.permissionCategory}:${e.permissionAction}` : "";
+    return `  ${time} ${e.eventType} ${e.decision ?? ""} ${perm} ${e.deniedBy ? `(denied by ${e.deniedBy})` : ""}`.trim();
+  });
+
+  return { text: `Audit log (${entries.length} entries):\n${lines.join("\n")}` };
+}
+
+// extractFlag imported from ../utils/args.js
 
 export default plugin;
