@@ -26,7 +26,8 @@ describe("group chat restricted info handling", () => {
 
     expect(decision.decision).toBe("REDACT");
     expect(decision.reasonCodes).toContain(REASON_CODES.RESTRICTED_INFO_ROLE_BLOCKED);
-    expect(decision.redactedContent).toContain("[REDACTED:SECRET]");
+    expect(decision.redactedContent).toContain("[REDACTED");
+    expect(decision.redactedContent).not.toContain("customer secret payload");
   });
 
   it("allows owner requests in DM without requiring approval", async () => {

@@ -22,11 +22,14 @@ function readJson(relativePath: string): unknown {
   return JSON.parse(content);
 }
 
+const packageJson = readJson("../package.json") as {
+  version: string;
+  openclaw?: { extensions?: unknown };
+  peerDependencies?: Record<string, string>;
+};
+
 describe("distribution contract", () => {
   it("declares OpenClaw npm extension entry in package.json", () => {
-    const packageJson = readJson("../package.json") as {
-      openclaw?: { extensions?: unknown };
-    };
 
     expect(Array.isArray(packageJson.openclaw?.extensions)).toBe(true);
     expect(packageJson.openclaw?.extensions).toContain(
@@ -38,7 +41,7 @@ describe("distribution contract", () => {
     const manifest = readJson("../openclaw.plugin.json") as Record<string, unknown>;
 
     expect(manifest.id).toBe("openclaw-guardrails");
-    expect(manifest.version).toBe("0.6.1");
+    expect(manifest.version).toBe(packageJson.version);
     expect(manifest.configSchema).toBeDefined();
     expect(typeof manifest.configSchema).toBe("object");
 
@@ -52,10 +55,6 @@ describe("distribution contract", () => {
   });
 
   it("declares peerDependencies on openclaw", () => {
-    const packageJson = readJson("../package.json") as {
-      peerDependencies?: Record<string, string>;
-    };
-
     expect(packageJson.peerDependencies?.openclaw).toBeDefined();
   });
 
@@ -74,7 +73,7 @@ describe("distribution contract", () => {
   it("exports a plugin definition with id, name, version, and register function", () => {
     expect(openclawGuardrailsPlugin.id).toBe("openclaw-guardrails");
     expect(openclawGuardrailsPlugin.name).toBe("OpenClaw Guardrails");
-    expect(openclawGuardrailsPlugin.version).toBe("0.6.1");
+    expect(openclawGuardrailsPlugin.version).toBe(packageJson.version);
     expect(typeof openclawGuardrailsPlugin.register).toBe("function");
   });
 

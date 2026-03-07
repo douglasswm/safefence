@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createOpenClawGuardrailsPlugin } from "../src/plugin/openclaw-adapter.js";
 import { CallbackNotificationSink } from "../src/core/notification-sink.js";
+import { REASON_CODES } from "../src/core/reason-codes.js";
 import type { TokenUsageSummary } from "../src/core/types.js";
 
 describe("openclaw adapter", () => {
@@ -154,7 +155,7 @@ describe("openclaw adapter", () => {
 
     expect(result.blocked).toBeUndefined();
     expect(result.guardrails?.decision.decision).toBe("ALLOW");
-    expect(result.guardrails?.decision.reasonCodes).toContain("ROLLOUT_AUDIT_OVERRIDE");
+    expect(result.guardrails?.decision.reasonCodes).toContain(REASON_CODES.ROLLOUT_AUDIT_OVERRIDE);
   });
 
   it("enforces only high-risk tools in rollout stage B", async () => {
@@ -175,7 +176,7 @@ describe("openclaw adapter", () => {
     expect(nonHighRisk.blocked).toBeUndefined();
     expect(nonHighRisk.guardrails?.decision.decision).toBe("ALLOW");
     expect(nonHighRisk.guardrails?.decision.reasonCodes).toContain(
-      "ROLLOUT_AUDIT_OVERRIDE"
+      REASON_CODES.ROLLOUT_AUDIT_OVERRIDE
     );
 
     const highRisk = await plugin.hooks.before_tool_call({
@@ -273,7 +274,7 @@ describe("openclaw adapter", () => {
     });
 
     expect(result.blocked).toBe(true);
-    expect(result.guardrails?.decision.reasonCodes).not.toContain("ROLLOUT_AUDIT_OVERRIDE");
+    expect(result.guardrails?.decision.reasonCodes).not.toContain(REASON_CODES.ROLLOUT_AUDIT_OVERRIDE);
   });
 
   it("redacts PII/secrets in outbound messages", async () => {

@@ -11,6 +11,7 @@ import {
   mapToMessageSendingResult,
   mapToToolResultPersistResult,
 } from "../src/plugin/event-adapter.js";
+import { REASON_CODES } from "../src/core/reason-codes.js";
 import type { OpenClawHookResult } from "../src/plugin/openclaw-adapter.js";
 
 describe("event-adapter: event → OpenClawContext mappers", () => {
@@ -104,12 +105,12 @@ describe("event-adapter: result mappers", () => {
   it("mapToBeforeToolCallResult maps blocked to block=true with reason", () => {
     const hookResult: OpenClawHookResult = {
       blocked: true,
-      reasonCodes: ["TOOL_NOT_ALLOWED", "BUDGET_EXCEEDED"]
+      reasonCodes: [REASON_CODES.TOOL_NOT_ALLOWED, REASON_CODES.BUDGET_REQUEST_EXCEEDED]
     };
     const result = mapToBeforeToolCallResult(hookResult);
     expect(result.block).toBe(true);
-    expect(result.blockReason).toContain("TOOL_NOT_ALLOWED");
-    expect(result.blockReason).toContain("BUDGET_EXCEEDED");
+    expect(result.blockReason).toContain(REASON_CODES.TOOL_NOT_ALLOWED);
+    expect(result.blockReason).toContain(REASON_CODES.BUDGET_REQUEST_EXCEEDED);
   });
 
   it("mapToBeforeToolCallResult returns empty for allowed actions", () => {

@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { JsonlAuditSink, NoopAuditSink } from "../src/core/audit-sink.js";
 import type { AuditEvent } from "../src/core/audit-sink.js";
+import { REASON_CODES } from "../src/core/reason-codes.js";
 
 function makeEvent(overrides: Partial<AuditEvent> = {}): AuditEvent {
   return {
@@ -39,7 +40,7 @@ describe("JsonlAuditSink", () => {
     const sink = new JsonlAuditSink(filePath);
 
     sink.append(makeEvent({ decision: "ALLOW" }));
-    sink.append(makeEvent({ decision: "DENY", reasonCodes: ["PROMPT_INJECTION"] }));
+    sink.append(makeEvent({ decision: "DENY", reasonCodes: [REASON_CODES.PROMPT_INJECTION] }));
     sink.close();
 
     const lines = fs.readFileSync(filePath, "utf-8").split("\n").filter(Boolean);
@@ -50,7 +51,7 @@ describe("JsonlAuditSink", () => {
 
     const second = JSON.parse(lines[1]);
     expect(second.decision).toBe("DENY");
-    expect(second.reasonCodes).toContain("PROMPT_INJECTION");
+    expect(second.reasonCodes).toContain(REASON_CODES.PROMPT_INJECTION);
   });
 
   it("creates directories if they don't exist", () => {
@@ -76,7 +77,7 @@ describe("JsonlAuditSink", () => {
       senderId: "user-1",
       toolName: "exec",
       decision: "DENY",
-      reasonCodes: ["COMMAND_BINARY_NOT_ALLOWED"],
+      reasonCodes: [REASON_CODES.COMMAND_BINARY_NOT_ALLOWED],
       riskScore: 0.8,
       elapsedMs: 12,
       approvalRequestId: "req-123"
