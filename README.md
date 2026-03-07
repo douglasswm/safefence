@@ -1,5 +1,9 @@
 # SafeFence
 
+[![npm version](https://img.shields.io/npm/v/@safefence/openclaw-guardrails)](https://www.npmjs.com/package/@safefence/openclaw-guardrails)
+[![npm provenance](https://img.shields.io/badge/npm-provenance-brightgreen)](https://docs.npmjs.com/generating-provenance-statements)
+[![CI](https://github.com/douglasswm/safefence/actions/workflows/publish.yml/badge.svg)](https://github.com/douglasswm/safefence/actions/workflows/publish.yml)
+
 > **Experimental** -- This project is under active development and not yet production-ready. APIs, config schemas, and behavior may change without notice between releases.
 
 Security-focused tooling for hardening OpenClaw agent deployments, with emphasis on OWASP LLM Top 10 controls, deterministic guardrails, and multi-user safety.
@@ -184,25 +188,22 @@ npm run build
 
 ## Release Workflow
 
+Releases are published automatically via GitHub Actions with [npm provenance](https://docs.npmjs.com/generating-provenance-statements). Every published version includes a Sigstore-signed attestation linking the package to the exact source commit and CI workflow.
+
 ```bash
 cd packages/openclaw-guardrails
 
 # 1. Bump version (runs tests, builds, syncs all version references, commits, tags)
 npm version patch   # or: npm version minor | npm version major
 
-# 2. Push to GitHub
+# 2. Push to GitHub — CI publishes to npm with provenance
 git push origin master --tags
 
-# 3. Publish to npm (use --tag beta for prereleases)
-npm publish --access public
-
-# 4. Verify
-npm view @safefence/openclaw-guardrails version
-openclaw plugins install @safefence/openclaw-guardrails@<version>
-openclaw plugins list
+# 3. Verify provenance
+npm audit signatures
 ```
 
-`npm version` automatically: runs tests, builds, syncs the version to `openclaw.plugin.json`, `src/plugin/version.ts`, and the root `README.md`, then commits and tags.
+`npm version` automatically: runs tests, builds, syncs the version to `openclaw.plugin.json`, `src/plugin/version.ts`, and the root `README.md`, then commits and tags. The publish workflow (`.github/workflows/publish.yml`) handles `npm publish --provenance` using GitHub OIDC — no manual signing keys required.
 
 Ensure `package.json` has `openclaw.extensions` pointing to `./dist/plugin/openclaw-extension.js`, and the tarball includes `dist/**`, `openclaw.plugin.json`, and `README.md`.
 

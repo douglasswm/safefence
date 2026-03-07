@@ -1,5 +1,8 @@
 # OpenClaw Guardrails
 
+[![npm version](https://img.shields.io/npm/v/@safefence/openclaw-guardrails)](https://www.npmjs.com/package/@safefence/openclaw-guardrails)
+[![npm provenance](https://img.shields.io/badge/npm-provenance-brightgreen)](https://docs.npmjs.com/generating-provenance-statements)
+
 > **Experimental** -- This project is under active development and not yet production-ready. APIs, config schemas, and behavior may change without notice between releases.
 
 Native TypeScript security kernel for OpenClaw (`>=2026.2.25`) with deterministic local enforcement, principal-aware authorization, and owner approval for group/multi-user safety.
@@ -437,6 +440,18 @@ src/
     ├── default-policy.ts             # Default config factory + merge
     └── patterns.ts                   # Detection pattern definitions
 ```
+
+## Provenance
+
+This package is published with [npm provenance](https://docs.npmjs.com/generating-provenance-statements) via GitHub Actions. Every published version includes a signed attestation linking the tarball to the exact source commit and build workflow in this repository.
+
+You can verify provenance for any version:
+
+```bash
+npm audit signatures
+```
+
+The publish workflow (`.github/workflows/publish.yml`) uses GitHub's OIDC token (`id-token: write`) to generate Sigstore-backed provenance statements automatically — no manual signing keys are involved.
 
 ## Install in OpenClaw
 
