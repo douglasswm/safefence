@@ -152,6 +152,7 @@ export interface GuardrailsConfig {
     enabled: boolean;
     adminChannelId?: string;
   };
+  rbacStore?: RbacStoreConfig;
 }
 
 export interface TokenUsageSummary {
@@ -198,4 +199,120 @@ export interface RuleHit {
 export interface NormalizedEvent extends GuardEvent {
   args: Record<string, unknown>;
   metadata: GuardMetadata;
+}
+
+// ═══════════════════════════════════════════
+// RBAC Store types (dual-authorization model)
+// ═══════════════════════════════════════════
+
+export interface DualAuthContext {
+  senderPlatform: string;
+  senderId: string;
+  botPlatform: string;
+  botPlatformId: string;
+  platformChannelId?: string;
+}
+
+export interface PermissionCheck {
+  category: string;
+  action: string;
+}
+
+export interface EffectivePermissions {
+  decision: "allow" | "deny";
+  userPermissions: Array<{ permission: PermissionCheck; effect: "allow" | "deny" }>;
+  botCapabilities: Array<{ permission: PermissionCheck; effect: "allow" | "deny" }>;
+  effectivePermissions: PermissionCheck[];
+  deniedBy: DeniedBy | null;
+}
+
+export interface BotInstance {
+  id: string;
+  projectId: string;
+  ownerId: string;
+  name?: string;
+  platform: string;
+  platformBotId?: string;
+  accountId?: string;
+  accessPolicy: "owner_only" | "project_members" | "explicit";
+  createdAt: number;
+}
+
+export interface RbacRole {
+  id: string;
+  projectId: string;
+  name: string;
+  description?: string;
+  isSystem: boolean;
+  createdBy?: string;
+  createdAt: number;
+}
+
+export interface RbacRoleAssignment {
+  id: string;
+  userId: string;
+  roleId: string;
+  scopeType: "project" | "im_channel";
+  scopeId: string;
+  botInstanceId?: string;
+  grantedBy?: string;
+  createdAt: number;
+  expiresAt?: number;
+}
+
+export type DeniedBy = "user_rbac" | "bot_capability" | "bot_access_policy" | "both" | "guardrail";
+
+export const AUDIT_EVENT_TYPES = {
+  // Authorization decisions
+  AUTHZ_ALLOW: "authz.allow",
+  AUTHZ_DENY_USER: "authz.deny_user",
+  AUTHZ_DENY_BOT: "authz.deny_bot",
+  AUTHZ_DENY_ACCESS: "authz.deny_access",
+  AUTHZ_DENY_UNKNOWN: "authz.deny_unknown",
+  // Admin mutations
+  ROLE_CREATE: "role.create",
+  ROLE_DELETE: "role.delete",
+  ROLE_PERM_GRANT: "role.perm_grant",
+  ROLE_PERM_REVOKE: "role.perm_revoke",
+  ASSIGNMENT_GRANT: "assignment.grant",
+  ASSIGNMENT_REVOKE: "assignment.revoke",
+  ASSIGNMENT_EXPIRE: "assignment.expire",
+  BOT_REGISTER: "bot.register",
+  BOT_CAP_SET: "bot.cap_set",
+  BOT_ACCESS_CHANGE: "bot.access_change",
+  CHANNEL_LINK: "channel.link",
+  CHANNEL_UNLINK: "channel.unlink",
+} as const;
+
+export type AuditEventType = typeof AUDIT_EVENT_TYPES[keyof typeof AUDIT_EVENT_TYPES];
+
+export interface AuditEntry {
+  id: string;
+  seq: number;
+  timestamp: number;
+  botInstanceId?: string;
+  actorUserId?: string;
+  actorPlatform?: string;
+  actorPlatformId?: string;
+  imChannelId?: string;
+  eventType: AuditEventType | string;
+  decision?: "allow" | "deny";
+  deniedBy?: DeniedBy;
+  permissionCategory?: string;
+  permissionAction?: string;
+  details?: Record<string, unknown>;
+  projectId?: string;
+  prevHash: string;
+  eventHash: string;
+}
+
+export interface RbacStoreConfig {
+  enabled: boolean;
+  dbPath?: string;
+  auditDbPath?: string;
+  auditRotation?: "monthly" | "quarterly" | "off";
+  seedFromConfig?: boolean;
+  botPlatformId?: string;
+  apiKey?: string;
+  apiPort?: number;
 }

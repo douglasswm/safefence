@@ -24,6 +24,7 @@ import { normalizeGuardEvent } from "./normalize.js";
 import { REASON_CODES } from "./reason-codes.js";
 import { aggregateRisk } from "./scoring.js";
 import type { TokenUsageStore } from "./token-usage-store.js";
+import type { RoleStore } from "./role-store.js";
 import type {
   ApproverRole,
   Decision,
@@ -52,6 +53,7 @@ export interface EngineOptions {
   customValidators?: CustomValidator[];
   tokenUsageStore?: TokenUsageStore;
   notificationSink?: NotificationSink;
+  roleStore?: RoleStore;
 }
 
 export class GuardrailsEngine {
@@ -60,6 +62,7 @@ export class GuardrailsEngine {
   private readonly auditSink: AuditSink;
   private readonly customValidators: CustomValidator[];
   readonly tokenUsageStore: TokenUsageStore | undefined;
+  readonly roleStore: RoleStore | undefined;
 
   constructor(
     private readonly config: GuardrailsConfig,
@@ -71,6 +74,7 @@ export class GuardrailsEngine {
     this.auditSink = opts.auditSink ?? new NoopAuditSink();
     this.customValidators = opts.customValidators ?? [];
     this.tokenUsageStore = opts.tokenUsageStore;
+    this.roleStore = opts.roleStore;
   }
 
   approveRequest(
@@ -91,7 +95,8 @@ export class GuardrailsEngine {
       const event = normalizeGuardEvent(rawEvent, fallbackPhase);
       const context: DetectorContext = {
         event,
-        config: this.config
+        config: this.config,
+        roleStore: this.roleStore
       };
 
       const hits: RuleHit[] = [];

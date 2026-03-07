@@ -173,7 +173,8 @@ export function createDefaultConfig(workspaceRoot: string): GuardrailsConfig {
     notifications: {
       enabled: false,
       adminChannelId: undefined
-    }
+    },
+    rbacStore: undefined
   };
 }
 
@@ -272,6 +273,9 @@ export function mergeConfig(
     notifications: {
       ...base.notifications,
       ...(overrides.notifications ?? {})
-    }
+    },
+    rbacStore: overrides.rbacStore
+      ? { ...(base.rbacStore ?? {}), ...overrides.rbacStore }
+      : base.rbacStore
   };
 }

@@ -1,13 +1,24 @@
 export { GuardrailsEngine } from "./core/engine.js";
 export type { EngineOptions } from "./core/engine.js";
 export { REASON_CODES } from "./core/reason-codes.js";
+export { AUDIT_EVENT_TYPES } from "./core/types.js";
 export type {
   ApproverRole,
+  AuditEntry,
+  AuditEventType,
+  BotInstance,
   ChannelType,
   DataClass,
   Decision,
+  DeniedBy,
+  DualAuthContext,
+  EffectivePermissions,
+  PermissionCheck,
   PrincipalContext,
   PrincipalRole,
+  RbacRole,
+  RbacRoleAssignment,
+  RbacStoreConfig,
   RolloutStage,
   GuardDecision,
   GuardEvent,
@@ -32,3 +43,9 @@ export {
 } from "./core/notification-sink.js";
 export { TokenUsageStore } from "./core/token-usage-store.js";
 export type { TokenUsageRecord } from "./core/token-usage-store.js";
+export type { RoleStore } from "./core/role-store.js";
+export { ConfigRoleStore } from "./core/config-role-store.js";
+export { SqliteRoleStore } from "./core/sqlite-role-store.js";
+export { AuditStore } from "./core/audit-store.js";
+export { createAdminServer } from "./admin/server.js";
+export type { AdminServerOptions } from "./admin/server.js";

@@ -1,3 +1,4 @@
+import type { RoleStore } from "../role-store.js";
 import type {
   ApproverRole,
   GuardDecision,
@@ -29,4 +30,5 @@ export interface OwnerApprovalResult extends DetectorResult {
 export interface DetectorContext {
   event: NormalizedEvent;
   config: GuardrailsConfig;
+  roleStore?: RoleStore;
 }

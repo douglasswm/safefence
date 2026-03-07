@@ -12,6 +12,7 @@ export interface AuditEvent {
   riskScore: number;
   elapsedMs: number;
   approvalRequestId?: string;
+  botInstanceId?: string;
 }
 
 export interface AuditSink {
