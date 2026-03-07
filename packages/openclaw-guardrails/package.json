@@ -22,7 +22,7 @@
     "test:watch": "vitest",
     "preversion": "npm test && npm run build",
     "version": "bash scripts/sync-version.sh",
-    "postversion": "echo '\nRun these to publish:\n  git push origin master --tags\n  npm publish --access public'"
+    "postversion": "echo '\nRun this to publish via CI:\n  git push origin master --tags'"
   },
   "engines": {
     "node": ">=20"

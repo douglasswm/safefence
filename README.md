@@ -191,19 +191,22 @@ npm run build
 Releases are published automatically via GitHub Actions with [npm provenance](https://docs.npmjs.com/generating-provenance-statements). Every published version includes a Sigstore-signed attestation linking the package to the exact source commit and CI workflow.
 
 ```bash
+# 1. Bump version from the package directory
+#    (npm version must run where package.json lives)
 cd packages/openclaw-guardrails
+npm version patch   # or: minor | major
 
-# 1. Bump version (runs tests, builds, syncs all version references, commits, tags)
-npm version patch   # or: npm version minor | npm version major
-
-# 2. Push to GitHub — CI publishes to npm with provenance
+# 2. Push commit + tag from anywhere in the repo — CI publishes to npm
+cd ../..
 git push origin master --tags
 
-# 3. Verify provenance
+# 3. Verify provenance after CI completes
 npm audit signatures
 ```
 
-`npm version` automatically: runs tests, builds, syncs the version to `openclaw.plugin.json`, `src/plugin/version.ts`, and the root `README.md`, then commits and tags. The publish workflow (`.github/workflows/publish.yml`) handles `npm publish --provenance` using GitHub OIDC — no manual signing keys required.
+`npm version` must be run from `packages/openclaw-guardrails/` because it operates on that directory's `package.json`. It automatically: runs tests, builds, syncs the version to `openclaw.plugin.json`, `src/plugin/version.ts`, and the root `README.md`, then creates a version commit and git tag.
+
+Pushing the `v*` tag triggers `.github/workflows/publish.yml`, which runs `npm publish` with provenance enabled via `publishConfig` in `package.json` and GitHub OIDC — no manual signing keys required.
 
 Ensure `package.json` has `openclaw.extensions` pointing to `./dist/plugin/openclaw-extension.js`, and the tarball includes `dist/**`, `openclaw.plugin.json`, and `README.md`.
 
