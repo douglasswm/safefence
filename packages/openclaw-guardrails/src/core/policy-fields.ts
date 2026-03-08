@@ -66,6 +66,7 @@ export const MUTABLE_POLICY_FIELDS: PolicyFieldDef[] = [
 ];
 
 export const MUTABLE_POLICY_KEYS = new Set(MUTABLE_POLICY_FIELDS.map((f) => f.key));
+export const MUTABLE_POLICY_FIELD_MAP = new Map(MUTABLE_POLICY_FIELDS.map((f) => [f.key, f]));
 
 export function getConfigValue(config: GuardrailsConfig, dotPath: string): unknown {
   const parts = dotPath.split(".");

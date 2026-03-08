@@ -12,9 +12,11 @@ import { randomUUID as generateUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { ConfigRoleStore } from "../core/config-role-store.js";
+import { parseSenderId } from "../core/identity.js";
 import {
   applyPolicyOverrides,
   getConfigValue,
+  MUTABLE_POLICY_FIELD_MAP,
   MUTABLE_POLICY_FIELDS,
   MUTABLE_POLICY_KEYS,
   parseFieldValue,
@@ -332,9 +334,9 @@ function resolveCommandRole(
 ): "owner" | "admin" | "none" {
   // Query RBAC store first for dynamic role resolution
   if (store) {
-    const idx = senderId.indexOf(":");
-    if (idx > 0 && idx < senderId.length - 1) {
-      const storeRole = store.resolveRole(senderId.slice(0, idx), senderId.slice(idx + 1));
+    const parsed = parseSenderId(senderId);
+    if (parsed) {
+      const storeRole = store.resolveRole(parsed.platform, parsed.platformId);
       if (storeRole === "owner") return "owner";
       if (storeRole === "admin") return "admin";
     }
@@ -441,25 +443,15 @@ function handleSetupCommand(
   const orgId = "default-org";
   const projectId = "default-project";
 
-  try {
-    store.ensureProject(projectId, orgId, "Default Project");
-  } catch {
-    // ensureProject may throw if org doesn't exist — create it first
-    try {
-      // The store should handle org creation via ensureProject
-      store.ensureProject(projectId, orgId, "Default Project");
-    } catch {
-      // ignore — project may already exist
-    }
-  }
+  try { store.ensureProject(projectId, orgId, "Default Project"); } catch { /* may exist */ }
 
   // Parse platform:id format
-  const colonIdx = senderId.indexOf(":");
-  const platform = colonIdx > 0 ? senderId.slice(0, colonIdx) : "unknown";
-  const platformId = colonIdx > 0 ? senderId.slice(colonIdx + 1) : senderId;
+  const parsed = parseSenderId(senderId);
+  const platform = parsed?.platform ?? "unknown";
+  const platformId = parsed?.platformId ?? senderId;
 
   store.ensureUser(senderId, undefined);
-  if (colonIdx > 0) {
+  if (parsed) {
     store.linkPlatformIdentity(platform, platformId, senderId);
   }
 
@@ -524,10 +516,10 @@ function handlePolicyCommand(
     }
 
     case "show": {
+      const overrideMap = new Map(store.getAllPolicyOverrides().map((o) => [o.key, o.value]));
       const lines = MUTABLE_POLICY_FIELDS.map((f) => {
         const current = getConfigValue(config, f.key);
-        const override = store.getPolicyOverride(f.key);
-        const marker = override !== undefined ? " [overridden]" : "";
+        const marker = overrideMap.has(f.key) ? " [overridden]" : "";
         return `  ${f.key} = ${JSON.stringify(current)}${marker}`;
       });
       return { text: `Mutable policy fields:\n${lines.join("\n")}` };
@@ -560,7 +552,7 @@ function handlePolicyCommand(
         return { text: `Unknown policy key: ${key}\nUse /sf policy show to see available keys.` };
       }
 
-      const field = MUTABLE_POLICY_FIELDS.find((f) => f.key === key)!;
+      const field = MUTABLE_POLICY_FIELD_MAP.get(key)!;
       let parsed: unknown;
       try {
         parsed = parseFieldValue(field, rawValue);

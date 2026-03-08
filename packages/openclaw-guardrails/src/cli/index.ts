@@ -18,11 +18,13 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import {
   getConfigValue,
+  MUTABLE_POLICY_FIELD_MAP,
   MUTABLE_POLICY_FIELDS,
   MUTABLE_POLICY_KEYS,
   parseFieldValue,
   validateFieldValue,
 } from "../core/policy-fields.js";
+import { parseSenderId } from "../core/identity.js";
 import { AUDIT_EVENT_TYPES } from "../core/types.js";
 import { createDefaultConfig } from "../rules/default-policy.js";
 import { extractFlag } from "../utils/args.js";
@@ -99,7 +101,7 @@ SafeFence CLI — RBAC management for OpenClaw guardrails
 
 Commands:
   setup                          First-time owner setup
-  policy list|get|set|reset      Manage runtime policy settings
+  policy list|show|get|set|reset  Manage runtime policy settings
   bot register|cap|access|list   Manage bot instances
   role create|delete|list|grant-perm|revoke-perm  Manage roles
   assign                         Assign a role to a user
@@ -387,8 +389,10 @@ function handleSetup(args: string[], store: import("../core/sqlite-role-store.js
   try { store.ensureProject(projectId, orgId, "Default Project"); } catch { /* may exist */ }
 
   store.ensureUser(owner, undefined);
-  const [platform, platformId] = splitPlatformId(owner);
-  if (platform !== "unknown") {
+  const parsed = parseSenderId(owner);
+  const platform = parsed?.platform ?? "unknown";
+  const platformId = parsed?.platformId ?? owner;
+  if (parsed) {
     store.linkPlatformIdentity(platform, platformId, owner);
   }
 
@@ -434,9 +438,10 @@ function handlePolicy(args: string[], store: import("../core/sqlite-role-store.j
     }
 
     case "show": {
+      const overrideMap = new Map(store.getAllPolicyOverrides().map((o) => [o.key, o.value]));
       console.log("Mutable policy fields:");
       for (const field of MUTABLE_POLICY_FIELDS) {
-        const override = store.getPolicyOverride(field.key);
+        const override = overrideMap.get(field.key);
         const current = override ?? getConfigValue(defaultConfig, field.key);
         const marker = override !== undefined ? " [overridden]" : "";
         console.log(`  ${field.key} = ${JSON.stringify(current)}${marker}`);
@@ -463,7 +468,7 @@ function handlePolicy(args: string[], store: import("../core/sqlite-role-store.j
       if (!key || !rawValue) { console.error("Usage: safefence policy set <key> <value>"); process.exit(1); }
       if (!MUTABLE_POLICY_KEYS.has(key)) { console.error(`Unknown policy key: ${key}`); process.exit(1); }
 
-      const field = MUTABLE_POLICY_FIELDS.find((f) => f.key === key)!;
+      const field = MUTABLE_POLICY_FIELD_MAP.get(key)!;
       let parsed: unknown;
       try {
         parsed = parseFieldValue(field, rawValue);

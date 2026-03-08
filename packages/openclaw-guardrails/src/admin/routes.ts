@@ -7,11 +7,13 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   getConfigValue,
+  MUTABLE_POLICY_FIELD_MAP,
   MUTABLE_POLICY_FIELDS,
   MUTABLE_POLICY_KEYS,
   setConfigValue,
   validateFieldValue,
 } from "../core/policy-fields.js";
+import { parseSenderId } from "../core/identity.js";
 import type { RoleStore } from "../core/role-store.js";
 import type { GuardrailsConfig } from "../core/types.js";
 import { AUDIT_EVENT_TYPES } from "../core/types.js";
@@ -306,9 +308,9 @@ function buildRoutes(): Route[] {
     try { ctx.store.ensureProject(projectId, orgId, "Default Project"); } catch { /* may exist */ }
 
     ctx.store.ensureUser(owner, undefined);
-    const colonIdx = owner.indexOf(":");
-    if (colonIdx > 0) {
-      ctx.store.linkPlatformIdentity(owner.slice(0, colonIdx), owner.slice(colonIdx + 1), owner);
+    const parsed = parseSenderId(owner);
+    if (parsed) {
+      ctx.store.linkPlatformIdentity(parsed.platform, parsed.platformId, owner);
     }
 
     const roles = ctx.store.listRoles(projectId);
@@ -367,7 +369,7 @@ function buildRoutes(): Route[] {
       json(res, 400, { error: "Request body must include 'value'" });
       return;
     }
-    const field = MUTABLE_POLICY_FIELDS.find((f) => f.key === key)!;
+    const field = MUTABLE_POLICY_FIELD_MAP.get(key)!;
     const validationError = validateFieldValue(field, body.value);
     if (validationError) {
       json(res, 400, { error: `Validation failed: ${validationError}` });

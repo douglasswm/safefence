@@ -242,6 +242,7 @@ export class SqliteRoleStore implements RoleStore {
   private stmtBotCapabilities: Statement;
   private stmtUserAssignmentsProject: Statement;
   private stmtUserAssignmentsProjectAndChannel: Statement;
+  private stmtResolveRoleByUser: Statement;
 
   constructor(dbPath: string, auditDbPath: string, seedConfig?: GuardrailsConfig) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -288,6 +289,13 @@ export class SqliteRoleStore implements RoleStore {
          OR
          (scope_type = 'im_channel' AND scope_id = ? AND (bot_instance_id IS NULL OR bot_instance_id = ?))
        )`
+    );
+
+    this.stmtResolveRoleByUser = this.db.prepare(
+      `SELECT r.name, r.is_system FROM role_assignments ra
+       JOIN roles r ON r.id = ra.role_id
+       WHERE ra.user_id = ?
+       AND (ra.expires_at IS NULL OR ra.expires_at > ?)`
     );
 
     this.auditStore = new AuditStore(auditDbPath);
@@ -894,12 +902,7 @@ export class SqliteRoleStore implements RoleStore {
     if (!userId) return "unknown";
 
     const now = Date.now();
-    const assignments = this.db.prepare(
-      `SELECT r.name, r.is_system FROM role_assignments ra
-       JOIN roles r ON r.id = ra.role_id
-       WHERE ra.user_id = ?
-       AND (ra.expires_at IS NULL OR ra.expires_at > ?)`
-    ).all(userId, now) as Array<{ name: string; is_system: number }>;
+    const assignments = this.stmtResolveRoleByUser.all(userId, now) as Array<{ name: string; is_system: number }>;
 
     if (assignments.length === 0) return "member";
 

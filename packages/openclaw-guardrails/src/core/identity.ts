@@ -56,7 +56,7 @@ function normalizeChannelType(value: unknown): ChannelType {
  * Parse a compound senderId (e.g. "telegram:12345") into platform and platformId.
  * Returns undefined if the format doesn't match.
  */
-function parseSenderId(senderId: string): { platform: string; platformId: string } | undefined {
+export function parseSenderId(senderId: string): { platform: string; platformId: string } | undefined {
   const idx = senderId.indexOf(":");
   if (idx <= 0 || idx === senderId.length - 1) return undefined;
   return { platform: senderId.slice(0, idx), platformId: senderId.slice(idx + 1) };
