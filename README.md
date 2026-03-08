@@ -202,15 +202,23 @@ Releases are published automatically via GitHub Actions with [npm provenance](ht
 cd packages/openclaw-guardrails
 npm version patch   # or: minor | major
 
-# 2. Push commit + tag from anywhere in the repo — CI publishes to npm
+# 2. npm version updates package.json and package-lock.json, but the
+#    version sync script also modifies openclaw.plugin.json, version.ts,
+#    and the root README.md. These changes are staged but NOT committed
+#    automatically — commit them yourself:
 cd ../..
+git add -A
+git commit -m "chore: bump version to $(node -p "require('./packages/openclaw-guardrails/package.json').version")"
+
+# 3. Tag and push — the v* tag triggers CI to publish to npm
+git tag "v$(node -p "require('./packages/openclaw-guardrails/package.json').version")"
 git push origin master --tags
 
-# 3. Verify provenance after CI completes
+# 4. Verify provenance after CI completes
 npm audit signatures
 ```
 
-`npm version` must be run from `packages/openclaw-guardrails/` because it operates on that directory's `package.json`. It automatically: runs tests, builds, syncs the version to `openclaw.plugin.json`, `src/plugin/version.ts`, and the root `README.md`, then creates a version commit and git tag.
+`npm version` must be run from `packages/openclaw-guardrails/` because it operates on that directory's `package.json`. It runs tests and builds via `preversion`, then syncs the version to `openclaw.plugin.json`, `src/plugin/version.ts`, and the root `README.md` via `scripts/sync-version.sh`. However, because this is a monorepo subdirectory, npm's auto-commit does not reliably capture all synced files — you must commit and tag manually.
 
 Pushing the `v*` tag triggers `.github/workflows/publish.yml`, which runs `npm publish` with provenance enabled via `publishConfig` in `package.json` and GitHub OIDC — no manual signing keys required.
 
