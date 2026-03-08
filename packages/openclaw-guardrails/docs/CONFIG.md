@@ -75,6 +75,16 @@ Full configuration options for `@safefence/openclaw-guardrails`.
 | `rbacStore` | `botPlatformId` | `string?` | — | This bot's platform ID for self-identification |
 | `rbacStore` | `apiKey` | `string?` | — | Bearer token for HTTP admin API authentication |
 | `rbacStore` | `apiPort` | `number?` | `18790` | Port for HTTP admin API server |
+| `controlPlane` | `enabled` | `boolean` | `false` | Connect to centralized control plane |
+| `controlPlane` | `endpoint` | `string` | — | Control plane URL (e.g. `https://safefence.example.com`) |
+| `controlPlane` | `orgApiKey` | `string` | — | Organization API key (`sf_...`) |
+| `controlPlane` | `tags` | `string[]?` | — | Instance tags for fleet organization |
+| `controlPlane` | `groupId` | `string?` | — | Instance group for per-environment policy overrides |
+| `controlPlane` | `syncIntervalMs` | `number?` | `30000` | Mutation flush interval |
+| `controlPlane` | `heartbeatIntervalMs` | `number?` | `30000` | Heartbeat report interval |
+| `controlPlane` | `auditFlushIntervalMs` | `number?` | `5000` | Audit batch upload interval |
+| `controlPlane` | `auditBatchSize` | `number?` | `500` | Max events per audit batch |
+| `controlPlane` | `instanceDataPath` | `string?` | `".safefence/instance.json"` | Path for persistent instance identity |
 
 ## Runtime-Mutable Fields
 
@@ -106,3 +116,38 @@ The following 22 config fields can be changed at runtime via `/sf policy set <ke
 | `supplyChain.allowedSkillHashes` | `string[]` | Pre-approved skill hashes |
 
 Policy overrides are persisted in the `policy_overrides` SQLite table and restored on startup. Changes via `/sf policy set` take effect immediately and survive gateway restarts. Use `/sf policy reset <key>` to revert to the original config file value.
+
+## Control Plane
+
+The `controlPlane` section configures optional connectivity to the SafeFence centralized control plane. When `enabled: false` (default), the plugin operates in standalone mode — identical to previous versions.
+
+### Minimal Configuration
+
+```ts
+{
+  controlPlane: {
+    enabled: true,
+    endpoint: "https://safefence.example.com",
+    orgApiKey: "sf_..."
+  }
+}
+```
+
+### What It Does
+
+When enabled, the plugin:
+
+1. **Registers** with the control plane on startup (receives a JWT instance token).
+2. **Pulls** a full policy and RBAC snapshot, applying to local SQLite.
+3. **Opens an SSE stream** for real-time change notifications.
+4. **Sends heartbeats** every 30s with sync versions and evaluation metrics.
+5. **Streams audit events** in batches every 5s via REST.
+6. **Flushes local mutations** (role changes made via `/sf` commands) upstream.
+
+### Offline Behavior
+
+If the control plane is unreachable, the plugin continues enforcing with cached local state. Audit events buffer in memory (up to 10,000) and replay from cursor on reconnect. Local `/sf` commands continue working; mutations queue for upstream sync.
+
+### Instance Identity
+
+Each plugin instance generates a persistent UUID stored at `instanceDataPath` (default: `.safefence/instance.json`). This identity survives restarts and is used for registration, heartbeat, and audit tracking.

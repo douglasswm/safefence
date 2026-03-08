@@ -116,6 +116,35 @@ const perms = store.resolveEffective({
 });
 ```
 
+### Control Plane (Centralized Management)
+
+Connect multiple OpenClaw instances to a centralized control plane for org-wide policy, RBAC, and audit management:
+
+```ts
+export default defineConfig({
+  plugins: {
+    entries: {
+      "openclaw-guardrails": {
+        enabled: true,
+        config: {
+          workspaceRoot: "/workspace/project",
+          mode: "enforce",
+          controlPlane: {
+            enabled: true,
+            endpoint: "https://safefence.example.com",
+            orgApiKey: "sf_...",
+            tags: ["production", "us-east"],
+            groupId: "prod-cluster",
+          }
+        }
+      }
+    }
+  }
+});
+```
+
+When enabled, the plugin registers with the control plane, syncs policies and RBAC state, and streams audit events upstream. Local SQLite remains the enforcement cache — if the control plane is unreachable, enforcement continues with cached state. See the [Config Reference](docs/CONFIG.md#control-plane) for all options.
+
 ### Zero-Config Setup
 
 Fresh installations require no config file edits. The plugin self-initializes and creates the SQLite database automatically:
@@ -170,11 +199,15 @@ const server = createAdminServer({
 
 ## Exports
 
-**Types**: `ApproverRole`, `ChannelType`, `DataClass`, `Decision`, `PrincipalContext`, `PrincipalRole`, `RolloutStage`, `GuardDecision`, `GuardEvent`, `GuardrailsConfig`, `Phase`, `TokenUsageSummary`, `AuditEvent`, `AuditSink`, `CustomValidator`, `CustomValidatorContext`, `NotificationSink`, `ApprovalNotification`, `TokenUsageRecord`, `EngineOptions`, `PluginOptions`, `AuditEntry`, `AuditEventType`, `BotInstance`, `DeniedBy`, `DualAuthContext`, `EffectivePermissions`, `PermissionCheck`, `RbacRole`, `RbacRoleAssignment`, `RbacStoreConfig`, `RoleStore`, `AdminServerOptions`.
+**Types**: `ApproverRole`, `ChannelType`, `DataClass`, `Decision`, `PrincipalContext`, `PrincipalRole`, `RolloutStage`, `GuardDecision`, `GuardEvent`, `GuardrailsConfig`, `ControlPlaneConfig`, `Phase`, `TokenUsageSummary`, `AuditEvent`, `AuditSink`, `CustomValidator`, `CustomValidatorContext`, `NotificationSink`, `ApprovalNotification`, `TokenUsageRecord`, `EngineOptions`, `PluginOptions`, `AuditEntry`, `AuditEventType`, `BotInstance`, `DeniedBy`, `DualAuthContext`, `EffectivePermissions`, `PermissionCheck`, `RbacRole`, `RbacRoleAssignment`, `RbacStoreConfig`, `RoleStore`, `AdminServerOptions`.
+
+**Sync protocol types**: `InstanceIdentity`, `RegisterRequest`, `RegisterResponse`, `HeartbeatRequest`, `HeartbeatResponse`, `SyncEvent`, `PolicySyncResponse`, `RbacSyncResponse`, `AuditBatchRequest`, `AuditBatchResponse`, `LocalMutation`, `MutationBatchRequest`, `MutationBatchResponse`, `SyncAckRequest`.
 
 **Constants**: `REASON_CODES`, `UNKNOWN_SENDER`, `UNKNOWN_CONVERSATION`, `AUDIT_EVENT_TYPES`.
 
 **Classes**: `GuardrailsEngine`, `JsonlAuditSink`, `NoopAuditSink`, `ConsoleNotificationSink`, `CallbackNotificationSink`, `NoopNotificationSink`, `TokenUsageStore`, `ConfigRoleStore`, `SqliteRoleStore`, `AuditStore`.
+
+**Sync classes**: `ControlPlaneAgent`, `ControlPlaneHttpClient`, `SseClient`, `SyncRoleStore`, `StreamingAuditSink`, `PolicySyncLoop`, `RbacSyncLoop`.
 
 **Config helpers**: `createDefaultConfig()`, `mergeConfig(base, overrides)`, `createAdminServer()`.
 

@@ -1,5 +1,35 @@
 # Migration Guide
 
+## v0.7.1 → v0.8.0
+
+1. **Control plane sync (opt-in)**: New `controlPlane` config section enables centralized policy, RBAC, and audit management. Default is `controlPlane.enabled: false` — no behavioral change for existing deployments. When enabled, the plugin registers with a control plane server and syncs state via REST + SSE.
+
+2. **New `ControlPlaneConfig` type**: Added to `GuardrailsConfig`. Fields: `enabled`, `endpoint`, `orgApiKey`, `tags`, `groupId`, `syncIntervalMs`, `heartbeatIntervalMs`, `auditFlushIntervalMs`, `auditBatchSize`, `instanceDataPath`.
+
+3. **New `src/sync/` directory**: 8 new files for agent-side sync components:
+   - `types.ts` — shared protocol types (registration, heartbeat, sync events, audit batches, mutations)
+   - `http-client.ts` — REST client for control plane API
+   - `sse-client.ts` — SSE client with auto-reconnect and exponential backoff
+   - `sync-role-store.ts` — `RoleStore` wrapper that queues mutations for upstream sync
+   - `streaming-audit-sink.ts` — `AuditSink` wrapper that buffers and flushes events upstream
+   - `policy-sync-loop.ts` — SSE-triggered policy delta pull and local application
+   - `rbac-sync-loop.ts` — SSE-triggered RBAC snapshot pull and local application
+   - `control-plane-agent.ts` — orchestrator for registration, heartbeat, and lifecycle
+
+4. **New exports**: `ControlPlaneAgent`, `ControlPlaneHttpClient`, `SseClient`, `SyncRoleStore`, `StreamingAuditSink`, `PolicySyncLoop`, `RbacSyncLoop`, plus all protocol types from `src/sync/types.ts`.
+
+5. **New utility**: `toError()` in `src/utils/args.ts` for consistent error coercion.
+
+6. **Integration change in `openclaw-extension.ts`**: When `controlPlane.enabled`, the plugin wraps `RoleStore` with `SyncRoleStore` and passes `StreamingAuditSink` to the guardrails engine. The engine and detectors are unchanged.
+
+7. **New companion packages** (separate from this package):
+   - `@safefence/control-plane` — Hono REST API + PostgreSQL + Redis SSE broadcaster
+   - `@safefence/dashboard` — Next.js admin dashboard
+
+8. **No breaking changes**: All existing APIs, config options, and behavior are preserved. The control plane integration is entirely additive.
+
+9. **Test count**: 186 tests across 22 test files (up from 176). No regressions.
+
 ## v0.7.0 → v0.7.1
 
 1. **Runtime policy store**: 22 guardrail config fields can now be changed at runtime via `/sf policy set <key> <value>`. Changes are persisted in SQLite and restored on startup. No breaking changes — all fields remain configurable via the config file.

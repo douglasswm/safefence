@@ -7,8 +7,9 @@ Detailed technical documentation for `@safefence/openclaw-guardrails`.
 - One engine path for all phases (`GuardrailsEngine`).
 - Fixed-order detector pipeline with deterministic reason codes.
 - Monotonic precedence: `DENY > REDACT > ALLOW`.
-- No runtime dependency on remote inference or policy services.
-- Zero runtime dependencies — uses only Node.js built-ins (`fetch()`, `fs`).
+- No runtime dependency on remote inference or policy services for local enforcement.
+- Zero runtime dependencies for standalone mode — uses only Node.js built-ins (`fetch()`, `fs`).
+- Optional control plane sync for centralized policy, RBAC, and audit management across instances.
 - Dual-authorization RBAC: effective permission = user roles ∩ bot capabilities.
 - Persistent SQLite store for roles, bot instances, and hash-chained audit log.
 - Backward-compatible: falls back to config-based `ownerIds`/`adminIds` when RBAC store is not enabled.
@@ -531,6 +532,84 @@ Incoming /sf command
 
 This means bootstrapped owners work without being listed in the config file.
 
+## Control Plane Sync (v0.8.0+)
+
+When `controlPlane.enabled` is true, a `ControlPlaneAgent` wraps the existing `RoleStore` and `AuditSink` with sync-capable decorators. No changes to the engine or detectors.
+
+### Sync Architecture
+
+```
+ControlPlaneAgent (orchestrator)
+  │
+  ├── SyncRoleStore (wraps SqliteRoleStore)
+  │     ├── All RoleStore methods delegate to inner store
+  │     ├── Write operations queue LocalMutation for upstream sync
+  │     └── withoutQueuing() bypasses queue for remote-applied changes
+  │
+  ├── StreamingAuditSink (wraps AuditSink)
+  │     ├── append() writes locally + buffers for upstream
+  │     └── flush() sends batch via REST, acks cursor
+  │
+  ├── PolicySyncLoop
+  │     └── SSE "policy_changed" → pull delta → apply to config + store
+  │
+  ├── RbacSyncLoop
+  │     └── SSE "rbac_changed" → pull snapshot → apply to local store
+  │
+  ├── SseClient (auto-reconnect with exponential backoff)
+  │     └── Receives: policy_changed, rbac_changed, force_resync, revoked
+  │
+  └── ControlPlaneHttpClient (REST with timeout)
+        ├── register / heartbeat / deregister
+        ├── pullPolicies / pullRbac
+        └── pushAuditBatch / pushMutations / ack
+```
+
+### Data Flow: Policy Sync
+
+```
+Admin sets policy in Dashboard
+  → Control Plane writes to PostgreSQL
+  → Redis pub/sub → SSE event to connected agents
+  → Agent pulls delta: GET /api/v1/sync/policies?since=N
+  → PolicySyncLoop applies via setPolicyOverride() + setConfigValue()
+    (wrapped in withoutQueuing() to prevent echo loop)
+  → Agent acks version
+```
+
+### Data Flow: Audit Upload
+
+```
+Engine evaluates → AuditSink.append(event)
+  → StreamingAuditSink writes locally (hash chain preserved)
+  → Buffers in memory ring (max 10,000 events)
+  → Flushes every 5s via REST: POST /api/v1/sync/audit/batch
+  → Cloud acks cursor → agent advances local cursor
+```
+
+### Offline Resilience
+
+- **Policy enforcement**: continues with cached config in local SQLite.
+- **Audit**: continues writing to local audit.db; replays from cursor on reconnect.
+- **Local `/sf` commands**: continue working; mutations queued for upstream sync.
+- **Heartbeat**: detects staleness; `force_resync` triggers full snapshot on reconnect.
+
+### Integration Point
+
+In `openclaw-extension.ts`, when `controlPlane.enabled`:
+
+```ts
+controlPlaneAgent = new ControlPlaneAgent({
+  controlPlaneConfig: fullConfig.controlPlane,
+  guardrailsConfig: fullConfig,
+  roleStore,          // original SqliteRoleStore
+  auditSink,          // original JsonlAuditSink
+});
+roleStore = controlPlaneAgent.roleStore;     // SyncRoleStore wrapper
+// auditSink wired into createOpenClawGuardrailsPlugin
+controlPlaneAgent.start();  // async, non-blocking
+```
+
 ## Source Layout
 
 ```
@@ -591,8 +670,17 @@ src/
 ├── rules/
 │   ├── default-policy.ts             # Default config factory + merge
 │   └── patterns.ts                   # Detection pattern definitions
+├── sync/                                # Control plane sync components (v0.8.0+)
+│   ├── types.ts                         # Shared protocol types (registration, heartbeat, sync)
+│   ├── http-client.ts                   # REST client with timeout (register, pull, push)
+│   ├── sse-client.ts                    # SSE client with auto-reconnect + exponential backoff
+│   ├── sync-role-store.ts               # RoleStore wrapper with mutation queuing
+│   ├── streaming-audit-sink.ts          # AuditSink wrapper with batched upload
+│   ├── policy-sync-loop.ts             # SSE-triggered policy pull + local apply
+│   ├── rbac-sync-loop.ts               # SSE-triggered RBAC pull + local apply
+│   └── control-plane-agent.ts           # Orchestrator (registration, heartbeat, lifecycle)
 ├── utils/
-│   └── args.ts                          # CLI flag extraction utility
+│   └── args.ts                          # CLI flag extraction + toError() utility
 ├── admin/
 │   ├── server.ts                        # HTTP admin API server
 │   └── routes.ts                        # REST route handlers

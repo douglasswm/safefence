@@ -11,13 +11,15 @@ Security-focused tooling for hardening OpenClaw agent deployments, with emphasis
 ## Repository Layout
 
 - `packages/openclaw-guardrails`: production TypeScript guardrails library/plugin.
+- `packages/control-plane`: centralized control plane API (Hono + PostgreSQL + Redis).
+- `packages/dashboard`: Next.js admin dashboard for policy, RBAC, fleet, and audit management.
 - `docs/openclaw-llm-security-research.md`: threat research, OWASP mapping, and hardening guidance.
 - `docs/rbac-research.md`: RBAC and adaptive guardrails strategic framework.
 - `CLAUDE.md`: local engineering workflow and coding standards.
 
 ## What This Project Delivers
 
-A deterministic security plugin for OpenClaw agents — no remote inference, zero runtime dependencies. Current version: `0.7.1`.
+A deterministic security plugin for OpenClaw agents — no remote inference, zero runtime dependencies. Now with optional centralized control plane for multi-instance fleet management. Current version: `0.8.0`.
 
 ### Detection Pipeline
 - Fixed-order detector pipeline (12 detectors): input intent (prompt injection, exfiltration, context probing), command policy, path canonicalization, network egress, supply chain provenance, principal authorization, owner approval, sensitive data, restricted-info redaction, output safety, budget enforcement, and external/custom validators.
@@ -42,11 +44,20 @@ A deterministic security plugin for OpenClaw agents — no remote inference, zer
 - Per-user token usage tracking with JSONL persistence.
 - Hash-chained, tamper-evident RBAC audit log (separate SQLite DB) for authorization decisions and admin mutations.
 
+### Control Plane (Optional SaaS)
+- Centralized policy, RBAC, and audit management across all OpenClaw instances in an organization.
+- Hybrid notify-then-pull sync: SSE push notifications trigger REST delta pulls.
+- Local SQLite acts as write-through cache — enforcement continues offline with cached state.
+- Streaming audit upload with batched REST and cursor-based acknowledgment.
+- Multi-tenant PostgreSQL with Row-Level Security per organization.
+- Next.js dashboard for org overview, instance fleet, policy editor, RBAC admin, and audit viewer.
+- Plugin works standalone when `controlPlane.enabled: false` (default).
+
 ### Operational Controls
 - Staged rollout (`stage_a_audit`, `stage_b_high_risk_enforce`, `stage_c_full_enforce`).
 - Runtime monitoring snapshot with false-positive threshold signaling.
 - Fail-closed by default.
-- 176 tests across 22 test files at ~85% line coverage.
+- 186 tests across 22 test files at ~85% line coverage.
 
 ## How It Works
 
@@ -185,6 +196,37 @@ sequenceDiagram
     ENG-->>Agent: ALLOW
 ```
 
+### Control Plane Architecture
+
+When `controlPlane.enabled` is set, each plugin instance connects to the centralized control plane:
+
+```
+┌────────────────────────────────────────────────────────┐
+│  SafeFence Cloud (control-plane package)               │
+│                                                        │
+│  REST API ◄──► PostgreSQL (RLS per org)                │
+│  SSE Broadcast ◄──► Redis pub/sub                      │
+│  Dashboard (Next.js) ◄──► REST API                     │
+└────────────┬──────────────────────▲────────────────────┘
+             │ Policy/RBAC sync     │ Audit events
+             │ (SSE + REST pull)    │ (REST batch POST)
+             │                      │
+┌────────────▼──────────────────────┴────────────────────┐
+│  OpenClaw Instance                                     │
+│                                                        │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │ @safefence/openclaw-guardrails                    │  │
+│  │  GuardrailsEngine → 12 detectors (local, fast)   │  │
+│  │  SyncRoleStore (wraps SqliteRoleStore + syncs)    │  │
+│  │  StreamingAuditSink (wraps AuditSink + streams)   │  │
+│  │  PolicySyncLoop + RbacSyncLoop (SSE-triggered)    │  │
+│  │  ControlPlaneAgent (registration + heartbeat)     │  │
+│  └──────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────┘
+```
+
+Key design principle: **detectors always run locally**. The control plane is never in the hot path. Sub-millisecond evaluation is preserved. Local SQLite acts as a write-through cache — if disconnected, enforcement continues against cached state.
+
 ## Quick Start (Current Package)
 
 ```bash
@@ -193,6 +235,32 @@ npm install
 npm test
 npm run test:coverage
 npm run build
+```
+
+## Quick Start (Control Plane)
+
+```bash
+# Start PostgreSQL + Redis + control plane
+cd packages/control-plane
+docker compose up -d
+
+# Start the dashboard
+cd packages/dashboard
+npm install && npm run dev
+# → Dashboard at http://localhost:3000
+
+# Create an organization (returns an API key)
+curl -X POST http://localhost:3100/api/v1/orgs \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "My Org"}'
+
+# Configure plugin instances to connect
+# In openclaw.config.ts:
+#   controlPlane: {
+#     enabled: true,
+#     endpoint: "http://localhost:3100",
+#     orgApiKey: "sf_..."
+#   }
 ```
 
 ## Release Workflow
@@ -229,7 +297,9 @@ Ensure `package.json` has `openclaw.extensions` pointing to `./dist/plugin/openc
 
 ## Documentation
 
-- Package docs: [`packages/openclaw-guardrails/README.md`](./packages/openclaw-guardrails/README.md)
+- Guardrails plugin: [`packages/openclaw-guardrails/README.md`](./packages/openclaw-guardrails/README.md)
+- Control plane API: [`packages/control-plane/`](./packages/control-plane/)
+- Dashboard: [`packages/dashboard/`](./packages/dashboard/)
 - Research report: [`docs/openclaw-llm-security-research.md`](./docs/openclaw-llm-security-research.md)
 - RBAC research: [`docs/rbac-research.md`](./docs/rbac-research.md)
 
