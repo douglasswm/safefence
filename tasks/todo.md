@@ -57,3 +57,38 @@
 - [x] `/sf policy` commands (list, show, get, set, reset)
 - [x] Hot-path performance fixes, dead retry bug fix
 - [x] 176 tests across 22 test files, all passing
+
+---
+
+## Milestone 8: SaaS Control Plane — Phase 0 (v0.8.0)
+- [x] Add `ControlPlaneConfig` type to `src/core/types.ts`
+- [x] Add `controlPlane?: ControlPlaneConfig` to `GuardrailsConfig`
+- [x] Create `src/sync/types.ts` — shared protocol types
+- [x] Default `controlPlane.enabled: false` in `default-policy.ts`
+
+## Milestone 9: SaaS Control Plane — Phase 1 (v0.9.0)
+- [x] `src/sync/http-client.ts` — typed REST client
+- [x] `src/sync/sse-client.ts` — SSE client with auto-reconnect
+- [x] `src/sync/policy-sync-loop.ts` — SSE-triggered policy pull
+- [x] `src/sync/rbac-sync-loop.ts` — SSE-triggered RBAC pull
+- [x] `src/sync/sync-role-store.ts` — wraps RoleStore + upstream sync
+- [x] `src/sync/streaming-audit-sink.ts` — wraps AuditSink + batch upload
+- [x] `src/sync/control-plane-agent.ts` — orchestrator
+- [x] Integration in `openclaw-extension.ts`
+- [x] Export new types/classes from `src/index.ts`
+
+## Milestone 10: SaaS Control Plane — Phase 2 (v1.0.0)
+- [x] `packages/control-plane/` scaffolding
+- [x] DB schema + Drizzle models (orgs, instances, policies, RBAC, audit)
+- [x] PostgreSQL migrations with RLS
+- [x] Auth middleware (API key + JWT)
+- [x] Sync API routes
+- [x] Management API routes
+- [x] Redis pub/sub for SSE broadcast
+- [x] Audit ingest pipeline
+- [x] `packages/dashboard/` Next.js skeleton
+- [x] Docker Compose for local dev
+
+### Verification
+- [x] `npx tsc --noEmit` — zero type errors on guardrails package
+- [x] `npx vitest run` — 186 tests pass across 22 files (no regressions)
