@@ -116,14 +116,43 @@ const perms = store.resolveEffective({
 });
 ```
 
+### Zero-Config Setup
+
+Fresh installations require no config file edits. The plugin self-initializes and creates the SQLite database automatically:
+
+```
+# In chat — claim ownership on first install
+/sf setup
+
+# Or via CLI for headless environments
+safefence setup --sender telegram:12345
+```
+
+The bootstrap is atomic (SQLite transaction) and one-time. Once an owner exists, `/sf setup` is rejected.
+
+### Runtime Policy Management
+
+22 config fields can be changed at runtime without restarting the gateway:
+
+```
+/sf policy show              # List all mutable fields with current values
+/sf policy set mode audit    # Switch to audit mode immediately
+/sf policy set limits.maxRequestsPerMinute 60
+/sf policy reset mode        # Revert to original config file value
+```
+
+Changes are persisted in SQLite and restored on startup. See [Config Reference](docs/CONFIG.md#runtime-mutable-fields) for the full list of mutable fields.
+
 ### Bot Commands
 
 When the RBAC store is enabled, the plugin registers `/sf` commands:
 
+- `/sf setup` — zero-config first-owner bootstrap
 - `/sf role create|delete|list|permissions|grant-perm|revoke-perm` — manage roles
 - `/sf assign|revoke|who` — manage role assignments
 - `/sf bot register|cap|access|list` — manage bot instances
 - `/sf channel link|unlink` — link IM channels to projects
+- `/sf policy list|show|get|set|reset` — runtime policy management
 - `/sf audit` — query the audit log
 
 ### HTTP Admin API
@@ -148,6 +177,10 @@ const server = createAdminServer({
 **Classes**: `GuardrailsEngine`, `JsonlAuditSink`, `NoopAuditSink`, `ConsoleNotificationSink`, `CallbackNotificationSink`, `NoopNotificationSink`, `TokenUsageStore`, `ConfigRoleStore`, `SqliteRoleStore`, `AuditStore`.
 
 **Config helpers**: `createDefaultConfig()`, `mergeConfig(base, overrides)`, `createAdminServer()`.
+
+**Policy store**: `MUTABLE_POLICY_FIELDS`, `MUTABLE_POLICY_KEYS`, `parseFieldValue()`, `validateFieldValue()`, `snapshotMutableDefaults()`, `applyPolicyOverrides()`, `getMutableDefault()`.
+
+**Bootstrap**: `bootstrapFirstOwner()`.
 
 ## Limitations
 

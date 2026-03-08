@@ -41,3 +41,19 @@
 - [x] `npx tsc --noEmit` -- no type errors
 - [x] `npx vitest run` -- 86 tests pass (18 files)
 - [x] `npx vitest run --coverage` -- 84.12% lines, 77.89% branches, 96.62% functions
+
+## Milestone 6: Persistent RBAC Store with Dual-Authorization (v0.7.0)
+- [x] SQLite-backed RoleStore with dual-auth (user RBAC ∩ bot capabilities)
+- [x] Hash-chained audit log (separate SQLite DB)
+- [x] ConfigRoleStore backward-compat adapter
+- [x] Bot commands (`/sf`), HTTP admin API, and CLI
+- [x] 144 tests across 20 test files, all passing
+
+## Milestone 7: Runtime Policy Store & Zero-Config Bootstrap (v0.7.1)
+- [x] Runtime policy store — 22 mutable config fields, persisted in SQLite
+- [x] Zero-config bootstrap — `/sf setup` claims first ownership atomically
+- [x] Dynamic RBAC role resolution — store-first lookup before config fallback
+- [x] Atomic bootstrap with TOCTOU-safe SQLite transaction
+- [x] `/sf policy` commands (list, show, get, set, reset)
+- [x] Hot-path performance fixes, dead retry bug fix
+- [x] 176 tests across 22 test files, all passing

@@ -75,3 +75,34 @@ Full configuration options for `@safefence/openclaw-guardrails`.
 | `rbacStore` | `botPlatformId` | `string?` | — | This bot's platform ID for self-identification |
 | `rbacStore` | `apiKey` | `string?` | — | Bearer token for HTTP admin API authentication |
 | `rbacStore` | `apiPort` | `number?` | `18790` | Port for HTTP admin API server |
+
+## Runtime-Mutable Fields
+
+The following 22 config fields can be changed at runtime via `/sf policy set <key> <value>` without restarting the gateway. All other fields require a config file change and restart.
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `mode` | `"enforce" \| "audit"` | Operating mode |
+| `rollout.stage` | `RolloutStage` | Current enforcement stage |
+| `limits.maxInputChars` | `number` | Max input content length (must be > 0) |
+| `limits.maxToolArgChars` | `number` | Max serialized tool args length (must be > 0) |
+| `limits.maxOutputChars` | `number` | Max tool output length (must be > 0) |
+| `limits.maxRequestsPerMinute` | `number` | Rate limit: requests per 60s window (must be > 0) |
+| `limits.maxToolCallsPerMinute` | `number` | Rate limit: tool calls per 60s window (must be > 0) |
+| `allow.tools` | `string[]` | Allowed tool names |
+| `allow.networkHosts` | `string[]` | Allowed egress hosts |
+| `allow.allowPrivateEgress` | `boolean` | Allow RFC 1918 / loopback destinations |
+| `deny.commandPatterns` | `string[]` | Destructive command regexes |
+| `authorization.restrictedTools` | `string[]` | Tools requiring elevated role or approval |
+| `approval.enabled` | `boolean` | Enable owner approval workflow |
+| `approval.ttlSeconds` | `number` | Approval challenge TTL (must be > 0) |
+| `approval.requireForTools` | `string[]` | Tools requiring approval |
+| `approval.ownerQuorum` | `number` | Number of approvers required (must be > 0) |
+| `monitoring.falsePositiveThresholdPct` | `number` | False positive rate threshold (must be > 0) |
+| `monitoring.consecutiveDaysForTuning` | `number` | Days above threshold before signaling (must be > 0) |
+| `notifications.enabled` | `boolean` | Enable approval notifications |
+| `notifications.adminChannelId` | `string` | Target channel for notifications |
+| `supplyChain.requireSkillHash` | `boolean` | Require hash for remote skills |
+| `supplyChain.allowedSkillHashes` | `string[]` | Pre-approved skill hashes |
+
+Policy overrides are persisted in the `policy_overrides` SQLite table and restored on startup. Changes via `/sf policy set` take effect immediately and survive gateway restarts. Use `/sf policy reset <key>` to revert to the original config file value.

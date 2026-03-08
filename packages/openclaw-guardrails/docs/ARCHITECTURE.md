@@ -421,6 +421,116 @@ D8: Sensitive Data ──► D9: Restricted Info ──► D10: Output Safety �
        └── redactedContent ──► └── redactedContent ──► └── Final redactedContent
 ```
 
+## Runtime Policy Store
+
+v0.7.1 introduces a runtime policy store that lets admins change guardrail configuration fields without restarting the gateway. Changes are persisted in SQLite and survive restarts.
+
+### Mutable Fields
+
+22 configuration fields are mutable at runtime, covering: operating mode, rollout stage, rate limits, tool allow/deny lists, approval settings, monitoring thresholds, notification config, and supply chain hashes. All other fields (e.g., `workspaceRoot`, redaction patterns, RBAC store paths) require a config file change and gateway restart.
+
+```
+Plugin Registration
+  │
+  ├── snapshotMutableDefaults(config)  ← capture pre-override values
+  │     (deep-copied into module-level Map)
+  │
+  ├── applyPolicyOverrides(config, store)  ← restore persisted overrides
+  │     (reads all rows from policy_overrides table)
+  │
+  └── Ready
+        │
+        ▼
+/sf policy set <key> <value>
+  │
+  ├── Validate key ∈ MUTABLE_POLICY_KEYS
+  ├── parseFieldValue(raw, fieldDef)
+  ├── validateFieldValue(parsed, fieldDef)
+  ├── store.setPolicyOverride(key, value, updatedBy)  ← audit-logged
+  └── setConfigValue(config, key, value)  ← live mutation, immediate effect
+
+/sf policy reset <key>
+  │
+  ├── store.deletePolicyOverride(key)  ← audit-logged
+  └── setConfigValue(config, key, getMutableDefault(key))  ← restore snapshot
+```
+
+### Policy Store SQLite Schema
+
+```sql
+CREATE TABLE policy_overrides (
+  key TEXT PRIMARY KEY,
+  value TEXT,         -- JSON-serialized
+  updated_by TEXT,
+  updated_at INTEGER
+);
+```
+
+### Policy Commands
+
+| Command | Description |
+|---|---|
+| `/sf policy list` | Show active overrides only |
+| `/sf policy show` | Show all 22 mutable fields with current values |
+| `/sf policy get <key>` | Show current, override, and default values |
+| `/sf policy set <key> <value>` | Parse, validate, persist, and apply immediately |
+| `/sf policy reset <key>` | Delete override and restore original default |
+
+Policy commands require `guardrail:configure` permission (owners only by default).
+
+## Zero-Config Bootstrap
+
+v0.7.1 enables a zero-config setup flow: the plugin self-initializes without requiring any owner/admin configuration in the config file. On first install, a user can claim ownership via a single `/sf setup` command.
+
+```
+Fresh Install
+  │
+  ├── Plugin registers with default config
+  ├── RBAC store created (SQLite, auto-creates .safefence/ directory)
+  ├── Policy overrides restored (none on first run)
+  ├── hasAnySuperadmin() → false
+  └── Logs: "Run /sf setup to claim ownership"
+        │
+        ▼
+User sends: /sf setup
+  │
+  ├── Bypasses normal auth (only command allowed pre-bootstrap)
+  ├── bootstrapFirstOwner(store, senderId, "chat")
+  │     │
+  │     ├── [SQLite transaction — atomic]
+  │     ├── Guard: hasAnySuperadmin() must be false
+  │     ├── Create default org + project
+  │     ├── Register user + link platform identity
+  │     ├── Assign superadmin role
+  │     └── Audit log: SETUP_BOOTSTRAP event
+  │
+  └── Returns welcome message with next-step commands
+```
+
+**Security**: The bootstrap is protected by a TOCTOU-safe SQLite transaction. Once a superadmin exists, `/sf setup` is rejected. The CLI also supports `safefence setup` for headless/non-chat bootstrap.
+
+## Dynamic RBAC Role Resolution
+
+v0.7.1 adds `resolveRole(platform, platformId)` to the `RoleStore` interface. This enables the plugin to dynamically determine a user's role from the RBAC store before falling back to static `ownerIds`/`adminIds` in config.
+
+```
+Incoming /sf command
+  │
+  ├── resolveCommandRole(store, config, senderId)
+  │     │
+  │     ├── store.resolveRole(platform, platformId)
+  │     │     ├── [SqliteRoleStore] Query platform_identities → role_assignments → roles
+  │     │     │   Returns: "owner" (superadmin) | "admin" | "member" | "unknown"
+  │     │     └── [ConfigRoleStore] Check ownerIds/adminIds arrays
+  │     │
+  │     └── If store returns "owner"/"admin", use it
+  │         Otherwise fall back to config.principal.ownerIds/adminIds
+  │
+  └── Check resolved role against required permission
+```
+
+This means bootstrapped owners work without being listed in the config file.
+
 ## Source Layout
 
 ```
@@ -448,9 +558,11 @@ src/
 │   ├── path-canonical.ts             # Path canonicalization + symlink checks
 │   ├── retrieval-trust.ts            # Retrieval trust level evaluation
 │   ├── supply-chain.ts               # Skill source + hash policy
-│   ├── role-store.ts                    # RoleStore interface (dual-auth)
+│   ├── role-store.ts                    # RoleStore interface (dual-auth + policy store)
 │   ├── config-role-store.ts             # Config-based adapter (backward compat)
-│   ├── sqlite-role-store.ts             # SQLite RBAC implementation
+│   ├── sqlite-role-store.ts             # SQLite RBAC + policy override implementation
+│   ├── bootstrap.ts                     # Atomic first-owner bootstrap flow
+│   ├── policy-fields.ts                 # Mutable policy field registry + helpers
 │   ├── audit-store.ts                   # Hash-chained audit log (separate DB)
 │   ├── sqlite-types.ts                  # SQLite type definitions
 │   ├── permissions.ts                   # Tool-to-permission mapping

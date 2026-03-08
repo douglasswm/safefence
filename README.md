@@ -28,12 +28,15 @@ A deterministic security plugin for OpenClaw agents — no remote inference, zer
 - Persistent RBAC store (SQLite) with per-user, per-bot, per-channel role assignments.
 - Bot instances as first-class entities with capability ceilings and access policies.
 - Bot commands (`/sf`), HTTP admin API, and CLI for dynamic role management without restart.
+- Zero-config bootstrap: `/sf setup` claims first ownership without config file edits.
+- Dynamic RBAC role resolution: store-first lookup before config fallback.
 - Group-aware mention-gating and role-based tool policy.
 - Owner-approval workflow with TTL, anti-replay, conversation binding, and optional persistence.
 - Admin notification bridge for approval workflow alerts.
 
 ### Extensibility
 - Immutable JSONL audit trail for every evaluation.
+- Runtime policy store: 22 config fields changeable via `/sf policy set` without restart, persisted in SQLite.
 - Custom business rule validators for domain-specific logic.
 - Optional external HTTP validators with circuit breaker (e.g. Guardrails AI).
 - Per-user token usage tracking with JSONL persistence.
@@ -43,7 +46,7 @@ A deterministic security plugin for OpenClaw agents — no remote inference, zer
 - Staged rollout (`stage_a_audit`, `stage_b_high_risk_enforce`, `stage_c_full_enforce`).
 - Runtime monitoring snapshot with false-positive threshold signaling.
 - Fail-closed by default.
-- 144 tests across 20 test files at ~85% line coverage.
+- 176 tests across 22 test files at ~85% line coverage.
 
 ## How It Works
 

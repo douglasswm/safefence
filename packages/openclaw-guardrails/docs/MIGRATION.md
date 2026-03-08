@@ -1,5 +1,23 @@
 # Migration Guide
 
+## v0.7.0 → v0.7.1
+
+1. **Runtime policy store**: 22 guardrail config fields can now be changed at runtime via `/sf policy set <key> <value>`. Changes are persisted in SQLite and restored on startup. No breaking changes — all fields remain configurable via the config file.
+
+2. **Zero-config bootstrap**: Fresh installations no longer require `ownerIds` in the config file. Run `/sf setup` in chat (or `safefence setup` via CLI) to claim ownership. The bootstrap is atomic (SQLite transaction) and one-time — rejected after the first superadmin exists.
+
+3. **Dynamic RBAC role resolution**: New `resolveRole(platform, platformId)` method on `RoleStore`. The plugin now queries the RBAC store for role resolution before falling back to static `ownerIds`/`adminIds`. This means bootstrapped owners work without config file edits.
+
+4. **New files**: `src/core/bootstrap.ts` (atomic bootstrap flow), `src/core/policy-fields.ts` (mutable field registry, parsing, validation).
+
+5. **New `/sf` commands**: `policy list`, `policy show`, `policy get <key>`, `policy set <key> <value>`, `policy reset <key>`, `setup`.
+
+6. **New RoleStore methods**: `resolveRole()`, `getPolicyOverride()`, `getAllPolicyOverrides()`, `setPolicyOverride()`, `deletePolicyOverride()`, `hasAnySuperadmin()`, `bootstrapOwner()`.
+
+7. **Performance**: Hot-path identity resolution optimized, dead retry bug fixed in policy/setup code.
+
+8. **Test count**: 176 tests across 22 test files (up from 144 across 20). New: `bootstrap.test.ts`, `policy-store.test.ts`.
+
 ## v0.6.5 → v0.7.0
 
 1. **Dual-authorization RBAC store**: New persistent SQLite-backed RBAC system. Enable via `rbacStore.enabled: true` in config. When disabled (default), behavior is identical to previous versions — no breaking changes.
