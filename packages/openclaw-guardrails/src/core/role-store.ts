@@ -160,6 +160,12 @@ export interface RoleStore {
 
   hasAnySuperadmin(): boolean;
 
+  /**
+   * Atomically claim the first owner on a fresh install.
+   * On SqliteRoleStore this runs in a transaction to prevent races.
+   */
+  bootstrapOwner(senderId: string, source?: string): import("./bootstrap.js").BootstrapResult;
+
   // ═══════════════════════════════════════════
   // Lifecycle
   // ═══════════════════════════════════════════

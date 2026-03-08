@@ -24,8 +24,7 @@ import {
   parseFieldValue,
   validateFieldValue,
 } from "../core/policy-fields.js";
-import { parseSenderId } from "../core/identity.js";
-import { AUDIT_EVENT_TYPES } from "../core/types.js";
+import { bootstrapFirstOwner } from "../core/bootstrap.js";
 import { createDefaultConfig } from "../rules/default-policy.js";
 import { extractFlag } from "../utils/args.js";
 
@@ -379,43 +378,15 @@ function handleSetup(args: string[], store: import("../core/sqlite-role-store.js
     process.exit(1);
   }
 
-  if (store.hasAnySuperadmin()) {
-    console.error("Setup already complete. An owner already exists.");
+  const result = bootstrapFirstOwner(store, owner, "cli");
+
+  if (!result.success) {
+    console.error(result.error);
     process.exit(1);
   }
 
-  const orgId = "default-org";
-  const projectId = "default-project";
-  try { store.ensureProject(projectId, orgId, "Default Project"); } catch { /* may exist */ }
-
-  store.ensureUser(owner, undefined);
-  const parsed = parseSenderId(owner);
-  const platform = parsed?.platform ?? "unknown";
-  const platformId = parsed?.platformId ?? owner;
-  if (parsed) {
-    store.linkPlatformIdentity(platform, platformId, owner);
-  }
-
-  const roles = store.listRoles(projectId);
-  const superadminRole = roles.find((r) => r.name === "superadmin" && r.isSystem);
-  if (!superadminRole) {
-    console.error("Error: superadmin role not found.");
-    process.exit(1);
-  }
-
-  store.assignRole(owner, superadminRole.id, "project", projectId, undefined, "system");
-
-  store.logDecision({
-    eventType: AUDIT_EVENT_TYPES.SETUP_BOOTSTRAP,
-    actorUserId: owner,
-    actorPlatform: platform,
-    actorPlatformId: platformId,
-    projectId,
-    details: { action: "first_owner_claim", source: "cli" }
-  });
-
-  console.log(`Setup complete. Owner registered: ${owner}`);
-  console.log(`Default project: ${projectId}`);
+  console.log(`Setup complete. Owner registered: ${result.ownerId}`);
+  console.log(`Default project: ${result.projectId}`);
 }
 
 function handlePolicy(args: string[], store: import("../core/sqlite-role-store.js").SqliteRoleStore): void {

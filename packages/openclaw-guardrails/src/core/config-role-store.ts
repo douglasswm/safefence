@@ -244,6 +244,10 @@ export class ConfigRoleStore implements RoleStore {
 
   // Bootstrap
 
+  bootstrapOwner(): import("./bootstrap.js").BootstrapResult {
+    throw new Error("ConfigRoleStore does not support bootstrap. Enable rbacStore.");
+  }
+
   hasAnySuperadmin(): boolean {
     // Config-based mode: owners exist if ownerIds is non-empty
     return this.config.principal.ownerIds.length > 0;

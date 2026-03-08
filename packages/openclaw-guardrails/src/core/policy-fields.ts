@@ -148,17 +148,27 @@ export function validateFieldValue(field: PolicyFieldDef, value: unknown): strin
   return null;
 }
 
+// Module-level snapshot of pre-override defaults for reset support.
+let _defaults: Map<string, unknown> | undefined;
+
 /**
  * Snapshot current values of all mutable fields for reset support.
+ * Call this BEFORE applying overrides. Captured internally.
  */
-export function snapshotMutableDefaults(config: GuardrailsConfig): Map<string, unknown> {
-  const snapshot = new Map<string, unknown>();
+export function snapshotMutableDefaults(config: GuardrailsConfig): void {
+  _defaults = new Map<string, unknown>();
   for (const field of MUTABLE_POLICY_FIELDS) {
     const value = getConfigValue(config, field.key);
     // Deep-copy arrays/objects so mutations don't affect the snapshot
-    snapshot.set(field.key, value != null && typeof value === "object" ? JSON.parse(JSON.stringify(value)) : value);
+    _defaults.set(field.key, value != null && typeof value === "object" ? JSON.parse(JSON.stringify(value)) : value);
   }
-  return snapshot;
+}
+
+/**
+ * Get the pre-override default value for a mutable policy field.
+ */
+export function getMutableDefault(key: string): unknown {
+  return _defaults?.get(key);
 }
 
 /**

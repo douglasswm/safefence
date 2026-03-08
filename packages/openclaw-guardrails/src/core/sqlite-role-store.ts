@@ -10,6 +10,8 @@
 
 import { randomUUID } from "node:crypto";
 import { AuditStore } from "./audit-store.js";
+import type { BootstrapResult } from "./bootstrap.js";
+import { executeBootstrap } from "./bootstrap.js";
 import { MUTABLE_POLICY_KEYS } from "./policy-fields.js";
 import type { RoleStore } from "./role-store.js";
 import type { Database, DatabaseConstructor, Statement } from "./sqlite-types.js";
@@ -1103,6 +1105,14 @@ export class SqliteRoleStore implements RoleStore {
        LIMIT 1`
     ).get(Date.now());
     return row !== undefined;
+  }
+
+  bootstrapOwner(senderId: string, source?: string): BootstrapResult {
+    // Wrap in a transaction so the hasAnySuperadmin check + assignRole
+    // are atomic — prevents two concurrent callers from both becoming owner.
+    return this.db.transaction(() => {
+      return executeBootstrap(this, senderId, source);
+    })();
   }
 
   close(): void {

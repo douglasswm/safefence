@@ -7,22 +7,21 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   getConfigValue,
+  getMutableDefault,
   MUTABLE_POLICY_FIELD_MAP,
   MUTABLE_POLICY_FIELDS,
   MUTABLE_POLICY_KEYS,
   setConfigValue,
   validateFieldValue,
 } from "../core/policy-fields.js";
-import { parseSenderId } from "../core/identity.js";
+import { bootstrapFirstOwner } from "../core/bootstrap.js";
 import type { RoleStore } from "../core/role-store.js";
 import type { GuardrailsConfig } from "../core/types.js";
-import { AUDIT_EVENT_TYPES } from "../core/types.js";
 
 export interface RouteContext {
   store: RoleStore;
   apiKey?: string;
   config?: GuardrailsConfig;
-  policyDefaults?: Map<string, unknown>;
 }
 
 type RouteHandler = (
@@ -291,11 +290,6 @@ function buildRoutes(): Route[] {
   // ── Setup ──
 
   route("POST", "/api/v1/setup", async (req, res, ctx) => {
-    if (ctx.store.hasAnySuperadmin()) {
-      json(res, 409, { error: "Setup already completed. An owner already exists." });
-      return;
-    }
-
     const body = await readBody(req);
     const owner = body.owner as string;
     if (!owner) {
@@ -303,33 +297,14 @@ function buildRoutes(): Route[] {
       return;
     }
 
-    const orgId = "default-org";
-    const projectId = "default-project";
-    try { ctx.store.ensureProject(projectId, orgId, "Default Project"); } catch { /* may exist */ }
+    const result = bootstrapFirstOwner(ctx.store, owner, "api");
 
-    ctx.store.ensureUser(owner, undefined);
-    const parsed = parseSenderId(owner);
-    if (parsed) {
-      ctx.store.linkPlatformIdentity(parsed.platform, parsed.platformId, owner);
-    }
-
-    const roles = ctx.store.listRoles(projectId);
-    const superadminRole = roles.find((r) => r.name === "superadmin" && r.isSystem);
-    if (!superadminRole) {
-      json(res, 500, { error: "superadmin role not found" });
+    if (!result.success) {
+      json(res, 409, { error: result.error });
       return;
     }
 
-    ctx.store.assignRole(owner, superadminRole.id, "project", projectId, undefined, "system");
-
-    ctx.store.logDecision({
-      eventType: AUDIT_EVENT_TYPES.SETUP_BOOTSTRAP,
-      actorUserId: owner,
-      projectId,
-      details: { action: "first_owner_claim", source: "api" }
-    });
-
-    json(res, 200, { status: "ok", ownerId: owner, projectId });
+    json(res, 200, { status: "ok", ownerId: result.ownerId, projectId: result.projectId });
   });
 
   // ── Policy ──
@@ -354,7 +329,7 @@ function buildRoutes(): Route[] {
     }
     const override = ctx.store.getPolicyOverride(key);
     const current = ctx.config ? getConfigValue(ctx.config, key) : undefined;
-    const defaultVal = ctx.policyDefaults?.get(key);
+    const defaultVal = getMutableDefault(key);
     json(res, 200, { key, current, override, default: defaultVal, overridden: override !== undefined });
   });
 
@@ -389,7 +364,7 @@ function buildRoutes(): Route[] {
       return;
     }
     ctx.store.deletePolicyOverride(key);
-    const defaultVal = ctx.policyDefaults?.get(key);
+    const defaultVal = getMutableDefault(key);
     if (ctx.config && defaultVal !== undefined) {
       setConfigValue(ctx.config, key, defaultVal);
     }

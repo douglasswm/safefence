@@ -11,11 +11,13 @@
 import { randomUUID as generateUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { bootstrapFirstOwner } from "../core/bootstrap.js";
 import { ConfigRoleStore } from "../core/config-role-store.js";
 import { parseSenderId } from "../core/identity.js";
 import {
   applyPolicyOverrides,
   getConfigValue,
+  getMutableDefault,
   MUTABLE_POLICY_FIELD_MAP,
   MUTABLE_POLICY_FIELDS,
   MUTABLE_POLICY_KEYS,
@@ -27,7 +29,6 @@ import {
 import { extractFlag } from "../utils/args.js";
 import type { RoleStore } from "../core/role-store.js";
 import type { GuardrailsConfig } from "../core/types.js";
-import { AUDIT_EVENT_TYPES } from "../core/types.js";
 import { redactWithPatterns } from "../redaction/redact.js";
 import { createDefaultConfig, mergeConfig } from "../rules/default-policy.js";
 import { createOpenClawGuardrailsPlugin } from "./openclaw-adapter.js";
@@ -143,7 +144,7 @@ const plugin = {
     }
 
     // Snapshot mutable defaults before applying persisted overrides
-    const policyDefaults = snapshotMutableDefaults(fullConfig);
+    snapshotMutableDefaults(fullConfig);
 
     // Apply persisted policy overrides from the store
     try {
@@ -156,6 +157,11 @@ const plugin = {
     const mergedConfig = guardrails.config;
 
     log.info(`[guardrails] plugin registered (v${guardrails.version}, mode=${mergedConfig.mode})`);
+
+    // Guide the admin on first install
+    if (!roleStore.hasAnySuperadmin()) {
+      log.warn("[guardrails] No owner configured. Run /sf setup in any chat to claim ownership, or use the CLI: safefence setup --owner <platform:id>");
+    }
 
     // ------------------------------------------------------------------
     // before_agent_start — inject security policy prompt
@@ -308,7 +314,7 @@ const plugin = {
       acceptsArgs: true,
       requireAuth: true,
       handler: (ctx: PluginCommandContext) => {
-        return handleSfCommand(ctx, roleStore, mergedConfig, log, policyDefaults);
+        return handleSfCommand(ctx, roleStore, mergedConfig, log);
       },
     });
   },
@@ -378,7 +384,6 @@ function handleSfCommand(
   store: RoleStore,
   config: GuardrailsConfig,
   log: PluginLogger,
-  policyDefaults?: Map<string, unknown>
 ): PluginCommandResult {
   const body = (ctx.commandBody ?? ctx.args ?? "").trim();
   const parts = body.split(/\s+/);
@@ -386,6 +391,9 @@ function handleSfCommand(
   const rest = parts.slice(1);
 
   if (!sub) {
+    if (!store.hasAnySuperadmin()) {
+      return { text: "SafeFence is not set up yet. Run /sf setup to claim ownership and get started." };
+    }
     return { text: sfHelp() };
   }
 
@@ -398,6 +406,9 @@ function handleSfCommand(
 
   // Authorization check: sender must be owner/admin for management commands
   if (!ctx.isAuthorizedSender) {
+    if (!store.hasAnySuperadmin()) {
+      return { text: "SafeFence is not set up yet. Run /sf setup to claim ownership and get started." };
+    }
     return { text: "Permission denied: only authorized senders can use /sf commands." };
   }
 
@@ -415,7 +426,7 @@ function handleSfCommand(
       case "bot": return handleBotCommand(rest, store, ctx);
       case "channel": return handleChannelCommand(rest, store, ctx);
       case "audit": return handleAuditCommand(rest, store);
-      case "policy": return handlePolicyCommand(rest, store, config, senderId, policyDefaults);
+      case "policy": return handlePolicyCommand(rest, store, config, senderId);
       case "help": return { text: sfHelp() };
       default: return { text: `Unknown command: ${sub}\n\n${sfHelp()}` };
     }
@@ -436,43 +447,11 @@ function handleSetupCommand(
     return { text: "Setup failed: could not identify sender. Please send from a platform account." };
   }
 
-  if (store.hasAnySuperadmin()) {
-    return { text: "Setup already complete. An owner already exists." };
+  const result = bootstrapFirstOwner(store, senderId, "chat");
+
+  if (!result.success) {
+    return { text: `Setup failed: ${result.error}` };
   }
-
-  const orgId = "default-org";
-  const projectId = "default-project";
-
-  try { store.ensureProject(projectId, orgId, "Default Project"); } catch { /* may exist */ }
-
-  // Parse platform:id format
-  const parsed = parseSenderId(senderId);
-  const platform = parsed?.platform ?? "unknown";
-  const platformId = parsed?.platformId ?? senderId;
-
-  store.ensureUser(senderId, undefined);
-  if (parsed) {
-    store.linkPlatformIdentity(platform, platformId, senderId);
-  }
-
-  // Find or create superadmin role and assign
-  const roles = store.listRoles(projectId);
-  const superadminRole = roles.find((r) => r.name === "superadmin" && r.isSystem);
-
-  if (!superadminRole) {
-    return { text: "Setup failed: superadmin role not found. RBAC store may not be initialized." };
-  }
-
-  store.assignRole(senderId, superadminRole.id, "project", projectId, undefined, "system");
-
-  store.logDecision({
-    eventType: AUDIT_EVENT_TYPES.SETUP_BOOTSTRAP,
-    actorUserId: senderId,
-    actorPlatform: platform,
-    actorPlatformId: platformId,
-    projectId,
-    details: { action: "first_owner_claim" }
-  });
 
   log.info(`[guardrails] First owner claimed: ${senderId}`);
 
@@ -480,8 +459,8 @@ function handleSetupCommand(
     text: [
       "SafeFence setup complete!",
       "",
-      `Owner registered: ${senderId}`,
-      `Default project: ${projectId}`,
+      `Owner registered: ${result.ownerId}`,
+      `Default project: ${result.projectId}`,
       "",
       "You can now:",
       "  /sf policy set mode audit       — switch to audit mode",
@@ -501,7 +480,6 @@ function handlePolicyCommand(
   store: RoleStore,
   config: GuardrailsConfig,
   senderId: string,
-  defaults?: Map<string, unknown>
 ): PluginCommandResult {
   const action = args[0]?.toLowerCase();
 
@@ -533,7 +511,7 @@ function handlePolicyCommand(
       }
       const current = getConfigValue(config, key);
       const override = store.getPolicyOverride(key);
-      const defaultVal = defaults?.get(key);
+      const defaultVal = getMutableDefault(key);
       return {
         text: [
           `${key}:`,
@@ -579,7 +557,7 @@ function handlePolicyCommand(
       }
 
       store.deletePolicyOverride(key);
-      const defaultVal = defaults?.get(key);
+      const defaultVal = getMutableDefault(key);
       if (defaultVal !== undefined) {
         setConfigValue(config, key, defaultVal);
       }

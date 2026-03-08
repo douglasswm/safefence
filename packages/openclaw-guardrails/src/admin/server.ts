@@ -13,12 +13,15 @@ export interface AdminServerOptions {
   port?: number;
   apiKey?: string;
   config?: GuardrailsConfig;
-  policyDefaults?: Map<string, unknown>;
 }
 
 export function createAdminServer(options: AdminServerOptions): Server {
-  const { store, port = 18790, apiKey, config, policyDefaults } = options;
+  const { store, port = 18790, apiKey, config } = options;
   const handleRequest = createRouter();
+
+  if (!apiKey) {
+    console.warn("[safefence] Admin API started WITHOUT authentication. Set apiKey to secure it.");
+  }
 
   const server = createServer(async (req, res) => {
     // CORS headers for local dev
@@ -32,7 +35,7 @@ export function createAdminServer(options: AdminServerOptions): Server {
       return;
     }
 
-    await handleRequest(req, res, { store, apiKey, config, policyDefaults });
+    await handleRequest(req, res, { store, apiKey, config });
   });
 
   server.listen(port, () => {
