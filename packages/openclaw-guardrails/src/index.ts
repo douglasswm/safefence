@@ -49,3 +49,38 @@ export { SqliteRoleStore } from "./core/sqlite-role-store.js";
 export { AuditStore } from "./core/audit-store.js";
 export { createAdminServer } from "./admin/server.js";
 export type { AdminServerOptions } from "./admin/server.js";
+export type { ControlPlaneConfig } from "./core/types.js";
+export type {
+  RegisterRequest,
+  RegisterResponse,
+  HeartbeatRequest,
+  HeartbeatResponse,
+  HeartbeatStatus,
+  InstanceMetrics,
+  SyncEvent,
+  SyncEventType,
+  PolicyOverrideRecord,
+  PolicyScope,
+  PolicySyncResponse,
+  RbacSyncResponse,
+  AuditBatchRequest,
+  AuditBatchResponse,
+  AuditUploadEvent,
+  LocalMutation,
+  MutationType,
+  MutationBatchRequest,
+  MutationBatchResponse,
+  SyncAckRequest,
+  InstanceIdentity,
+} from "./sync/types.js";
+export { ControlPlaneAgent } from "./sync/control-plane-agent.js";
+export type { AgentStatus, ControlPlaneAgentOptions } from "./sync/control-plane-agent.js";
+export { SyncRoleStore } from "./sync/sync-role-store.js";
+export { StreamingAuditSink } from "./sync/streaming-audit-sink.js";
+export type { StreamingAuditSinkOptions } from "./sync/streaming-audit-sink.js";
+export { ControlPlaneHttpClient, ControlPlaneHttpError } from "./sync/http-client.js";
+export type { HttpClientOptions } from "./sync/http-client.js";
+export { SseClient } from "./sync/sse-client.js";
+export type { SseClientOptions } from "./sync/sse-client.js";
+export { PolicySyncLoop } from "./sync/policy-sync-loop.js";
+export { RbacSyncLoop } from "./sync/rbac-sync-loop.js";

@@ -29,6 +29,9 @@ import {
 import { extractFlag } from "../utils/args.js";
 import type { RoleStore } from "../core/role-store.js";
 import type { GuardrailsConfig } from "../core/types.js";
+import { JsonlAuditSink, NoopAuditSink } from "../core/audit-sink.js";
+import type { AuditSink } from "../core/audit-sink.js";
+import { ControlPlaneAgent } from "../sync/control-plane-agent.js";
 import { redactWithPatterns } from "../redaction/redact.js";
 import { createDefaultConfig, mergeConfig } from "../rules/default-policy.js";
 import { createOpenClawGuardrailsPlugin } from "./openclaw-adapter.js";
@@ -153,7 +156,39 @@ const plugin = {
       log.warn("[guardrails] Failed to apply persisted policy overrides");
     }
 
-    const guardrails = createOpenClawGuardrailsPlugin({ mergedConfig: fullConfig, roleStore });
+    // ── Control Plane Agent (optional, off by default) ──
+    let controlPlaneAgent: ControlPlaneAgent | undefined;
+    if (fullConfig.controlPlane?.enabled && fullConfig.controlPlane.endpoint && fullConfig.controlPlane.orgApiKey) {
+      const auditSinkPath = fullConfig.audit?.sinkPath ?? `${workspaceRoot}/.safefence/audit.jsonl`;
+      const localAuditSink: AuditSink = fullConfig.audit?.enabled
+        ? new JsonlAuditSink(auditSinkPath)
+        : new NoopAuditSink();
+
+      controlPlaneAgent = new ControlPlaneAgent({
+        controlPlaneConfig: fullConfig.controlPlane,
+        guardrailsConfig: fullConfig,
+        roleStore,
+        auditSink: localAuditSink,
+        onError: (err) => log.error(`[guardrails:control-plane] ${err.message}`),
+        onStatusChange: (status) => log.info(`[guardrails:control-plane] status=${status}`),
+      });
+
+      // Use synced stores instead of local ones
+      roleStore = controlPlaneAgent.roleStore;
+
+      // Start async (don't block plugin registration)
+      controlPlaneAgent.start().catch((err) => {
+        log.error(`[guardrails:control-plane] failed to start: ${String(err)}`);
+      });
+
+      log.info(`[guardrails:control-plane] agent initialized (endpoint=${fullConfig.controlPlane.endpoint})`);
+    }
+
+    const guardrails = createOpenClawGuardrailsPlugin({
+      mergedConfig: fullConfig,
+      roleStore,
+      auditSink: controlPlaneAgent?.auditSink,
+    });
     const mergedConfig = guardrails.config;
 
     log.info(`[guardrails] plugin registered (v${guardrails.version}, mode=${mergedConfig.mode})`);
