@@ -4,13 +4,14 @@ import { safeStringify, truncate } from "../event-utils.js";
 import type { RuleHit } from "../types.js";
 import type { DetectorContext } from "./types.js";
 
-const CONTEXT_PROBE_PATTERNS = [
-  "list.*(?:your|the).*files",
-  "what.*files.*(?:do you|are|have)",
-  "show.*(?:your|the).*(?:workspace|directory|folder|context)",
-  "what(?:'s| is).*(?:in )?your.*(?:workspace|directory|folder|context)",
-  "(?:print|show|read|output|display|reveal|dump|give).*\\b(?:agents|soul|bootstrap|identity|heartbeat|tools|user)\\.md\\b",
-  "(?:what|which).*(?:md|markdown).*files"
+// Pre-compiled with bounded quantifiers to prevent ReDoS
+const CONTEXT_PROBE_REGEXES: RegExp[] = [
+  /list.{0,80}(?:your|the).{0,80}files/i,
+  /what.{0,80}files.{0,80}(?:do you|are|have)/i,
+  /show.{0,80}(?:your|the).{0,80}(?:workspace|directory|folder|context)/i,
+  /what(?:'s| is).{0,80}(?:in )?your.{0,80}(?:workspace|directory|folder|context)/i,
+  /(?:print|show|read|output|display|reveal|dump|give).{0,80}\b(?:agents|soul|bootstrap|identity|heartbeat|tools|user)\.md\b/i,
+  /(?:what|which).{0,80}(?:md|markdown).{0,80}files/i
 ];
 
 function detectContextProbe(
@@ -38,10 +39,8 @@ function detectContextProbe(
     };
   }
 
-  // Check for workspace/context probing patterns
-  const hasProbePattern = CONTEXT_PROBE_PATTERNS.some((pattern) =>
-    new RegExp(pattern, "i").test(lower)
-  );
+  // Check for workspace/context probing patterns (pre-compiled, bounded quantifiers)
+  const hasProbePattern = CONTEXT_PROBE_REGEXES.some((regex) => regex.test(lower));
 
   if (hasProbePattern) {
     return {

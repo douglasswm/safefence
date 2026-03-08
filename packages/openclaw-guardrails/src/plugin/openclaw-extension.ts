@@ -294,7 +294,11 @@ const plugin = {
         if (!ctx.isAuthorizedSender) {
           return { text: "Only authorized senders (owner/admin) can approve requests." };
         }
-        const token = guardrails.approveRequest(requestId, senderId, "owner");
+        const callerRole = resolveCommandRole(senderId, mergedConfig, roleStore);
+        if (callerRole === "none") {
+          return { text: "Permission denied: only owners and admins can approve requests." };
+        }
+        const token = guardrails.approveRequest(requestId, senderId, callerRole);
 
         if (token) {
           log.info(`[guardrails:approve] request ${requestId} approved by ${senderId}`);
@@ -443,8 +447,14 @@ function handleSetupCommand(
   store: RoleStore,
   log: PluginLogger
 ): PluginCommandResult {
-  if (senderId === "unknown") {
+  if (senderId === "unknown" || !senderId) {
     return { text: "Setup failed: could not identify sender. Please send from a platform account." };
+  }
+
+  // Validate senderId is a compound "platform:id" format
+  const parsed = parseSenderId(senderId);
+  if (!parsed || !parsed.platform || !parsed.platformId) {
+    return { text: "Setup failed: sender ID must be in 'platform:id' format (e.g. telegram:12345)." };
   }
 
   const result = bootstrapFirstOwner(store, senderId, "chat");
@@ -722,9 +732,10 @@ function handleBotCommand(args: string[], store: RoleStore, ctx: PluginCommandCo
       const subAction = args[1]?.toLowerCase();
       if (subAction === "set") {
         const permId = args[2];
-        const effect = args[3] as "allow" | "deny";
+        const effect = args[3];
         const botId = extractFlag(args, "--bot");
         if (!botId || !permId || !effect) return { text: "Usage: /sf bot cap set <perm> allow|deny --bot <id>" };
+        if (effect !== "allow" && effect !== "deny") return { text: "effect must be 'allow' or 'deny'" };
         store.setBotCapability(botId, permId, effect);
         return { text: `Set ${permId} = ${effect} on bot ${botId}` };
       }
@@ -739,10 +750,12 @@ function handleBotCommand(args: string[], store: RoleStore, ctx: PluginCommandCo
       return { text: "Usage: /sf bot cap set|list" };
     }
     case "access": {
-      const policy = args[1] as "owner_only" | "project_members" | "explicit" | undefined;
+      const policy = args[1];
       const botId = extractFlag(args, "--bot");
       if (!botId || !policy) return { text: "Usage: /sf bot access <policy> --bot <id>" };
-      store.setBotAccessPolicy(botId, policy);
+      const validPolicies = new Set(["owner_only", "project_members", "explicit"]);
+      if (!validPolicies.has(policy)) return { text: "policy must be 'owner_only', 'project_members', or 'explicit'" };
+      store.setBotAccessPolicy(botId, policy as "owner_only" | "project_members" | "explicit");
       return { text: `Set access policy to ${policy} on bot ${botId}` };
     }
     case "list": {

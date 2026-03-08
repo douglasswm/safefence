@@ -20,14 +20,12 @@ export function createAdminServer(options: AdminServerOptions): Server {
   const handleRequest = createRouter();
 
   if (!apiKey) {
-    console.warn("[safefence] Admin API started WITHOUT authentication. Set apiKey to secure it.");
+    console.warn("[safefence] Admin API started WITHOUT authentication. All requests will be rejected. Set apiKey to enable access.");
   }
 
   const server = createServer(async (req, res) => {
-    // CORS headers for local dev
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    // No CORS headers — admin API is not intended for browser access.
+    // Clients should call from the same host via curl, CLI, or server-side code.
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);

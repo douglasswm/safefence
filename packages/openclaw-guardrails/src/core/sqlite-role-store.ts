@@ -578,8 +578,17 @@ export class SqliteRoleStore implements RoleStore {
         return { allowed: row !== undefined };
       }
       case "project_members":
-      default:
-        return { allowed: true };
+      default: {
+        // Verify the user has at least one non-expired role assignment in the bot's project
+        const memberCheck = this.db.prepare(
+          `SELECT 1 FROM role_assignments ra
+           JOIN roles r ON r.id = ra.role_id
+           WHERE ra.user_id = ? AND r.project_id = ?
+           AND (ra.expires_at IS NULL OR ra.expires_at > ?)
+           LIMIT 1`
+        ).get(userId, bot.projectId, Date.now());
+        return { allowed: memberCheck !== undefined };
+      }
     }
   }
 
@@ -681,6 +690,11 @@ export class SqliteRoleStore implements RoleStore {
   }
 
   setBotCapability(botInstanceId: string, permissionId: string, effect: "allow" | "deny"): void {
+    // Validate permissionId exists before insert
+    const exists = this.db.prepare("SELECT 1 FROM permissions WHERE id = ?").get(permissionId);
+    if (!exists) {
+      throw new Error(`Unknown permission: ${permissionId}. Use a valid permission ID (e.g. tool_use:read).`);
+    }
     this.db.prepare(
       `INSERT INTO bot_capabilities (bot_instance_id, permission_id, effect)
        VALUES (?, ?, ?)
@@ -753,6 +767,11 @@ export class SqliteRoleStore implements RoleStore {
   }
 
   grantRolePermission(roleId: string, permissionId: string, effect: "allow" | "deny"): void {
+    // Validate permissionId exists before insert
+    const exists = this.db.prepare("SELECT 1 FROM permissions WHERE id = ?").get(permissionId);
+    if (!exists) {
+      throw new Error(`Unknown permission: ${permissionId}. Use a valid permission ID (e.g. tool_use:read).`);
+    }
     this.db.prepare(
       `INSERT INTO role_permissions (role_id, permission_id, effect)
        VALUES (?, ?, ?)
@@ -803,28 +822,31 @@ export class SqliteRoleStore implements RoleStore {
   }
 
   revokeRole(assignmentId: string): void {
-    const assignment = this.db.prepare(
-      "SELECT * FROM role_assignments WHERE id = ?"
-    ).get(assignmentId);
+    // Wrap in transaction to prevent TOCTOU race on last-superadmin check
+    this.db.transaction(() => {
+      const assignment = this.db.prepare(
+        "SELECT * FROM role_assignments WHERE id = ?"
+      ).get(assignmentId);
 
-    if (assignment) {
-      const role = this.db.prepare("SELECT * FROM roles WHERE id = ?").get(assignment.role_id as string);
+      if (assignment) {
+        const role = this.db.prepare("SELECT * FROM roles WHERE id = ?").get(assignment.role_id as string);
 
-      if (role && (role.name as string) === "superadmin" && (role.is_system as number) === 1) {
-        const count = this.db.prepare(
-          `SELECT COUNT(*) as cnt FROM role_assignments ra
-           JOIN roles r ON r.id = ra.role_id
-           WHERE r.project_id = ? AND r.name = 'superadmin' AND r.is_system = 1
-           AND ra.id != ?`
-        ).get(role.project_id as string, assignmentId);
+        if (role && (role.name as string) === "superadmin" && (role.is_system as number) === 1) {
+          const count = this.db.prepare(
+            `SELECT COUNT(*) as cnt FROM role_assignments ra
+             JOIN roles r ON r.id = ra.role_id
+             WHERE r.project_id = ? AND r.name = 'superadmin' AND r.is_system = 1
+             AND ra.id != ?`
+          ).get(role.project_id as string, assignmentId);
 
-        if ((count?.cnt as number) < 1) {
-          throw new Error("Cannot revoke last superadmin role assignment in project");
+          if ((count?.cnt as number) < 1) {
+            throw new Error("Cannot revoke last superadmin role assignment in project");
+          }
         }
       }
-    }
 
-    this.db.prepare("DELETE FROM role_assignments WHERE id = ?").run(assignmentId);
+      this.db.prepare("DELETE FROM role_assignments WHERE id = ?").run(assignmentId);
+    })();
 
     this.logDecision({
       eventType: AUDIT_EVENT_TYPES.ASSIGNMENT_REVOKE,

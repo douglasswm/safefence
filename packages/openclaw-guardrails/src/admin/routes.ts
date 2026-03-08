@@ -43,10 +43,21 @@ function json(res: ServerResponse, status: number, data: unknown): void {
   res.end(JSON.stringify(data));
 }
 
+const MAX_BODY_BYTES = 1_048_576; // 1 MB
+
 async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    let totalBytes = 0;
+    req.on("data", (chunk: Buffer) => {
+      totalBytes += chunk.length;
+      if (totalBytes > MAX_BODY_BYTES) {
+        req.destroy();
+        reject(new Error("Request body too large"));
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => {
       try {
         const body = Buffer.concat(chunks).toString("utf-8");
@@ -60,9 +71,21 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
 }
 
 function checkAuth(req: IncomingMessage, apiKey: string | undefined): boolean {
-  if (!apiKey) return true;
+  if (!apiKey) {
+    // No API key configured — reject all requests. The server logs a warning on startup.
+    return false;
+  }
   const auth = req.headers.authorization;
-  return auth === `Bearer ${apiKey}`;
+  if (!auth || !apiKey) return false;
+  // Constant-time comparison to prevent timing attacks
+  const expected = `Bearer ${apiKey}`;
+  if (auth.length !== expected.length) return false;
+  const { timingSafeEqual } = require("node:crypto") as typeof import("node:crypto");
+  try {
+    return timingSafeEqual(Buffer.from(auth), Buffer.from(expected));
+  } catch {
+    return false;
+  }
 }
 
 function buildRoutes(): Route[] {
@@ -113,9 +136,13 @@ function buildRoutes(): Route[] {
   route("PUT", "/api/v1/bots/:botId/capabilities", async (req, res, ctx, params) => {
     const body = await readBody(req);
     const permissionId = body.permissionId as string;
-    const effect = body.effect as "allow" | "deny";
+    const effect = body.effect as string;
     if (!permissionId || !effect) {
       json(res, 400, { error: "permissionId and effect are required" });
+      return;
+    }
+    if (effect !== "allow" && effect !== "deny") {
+      json(res, 400, { error: "effect must be 'allow' or 'deny'" });
       return;
     }
     ctx.store.setBotCapability(params.botId, permissionId, effect);
@@ -124,12 +151,17 @@ function buildRoutes(): Route[] {
 
   route("PUT", "/api/v1/bots/:botId/access-policy", async (req, res, ctx, params) => {
     const body = await readBody(req);
-    const policy = body.policy as "owner_only" | "project_members" | "explicit";
+    const policy = body.policy as string;
     if (!policy) {
       json(res, 400, { error: "policy is required" });
       return;
     }
-    ctx.store.setBotAccessPolicy(params.botId, policy);
+    const validPolicies = new Set(["owner_only", "project_members", "explicit"]);
+    if (!validPolicies.has(policy)) {
+      json(res, 400, { error: "policy must be 'owner_only', 'project_members', or 'explicit'" });
+      return;
+    }
+    ctx.store.setBotAccessPolicy(params.botId, policy as "owner_only" | "project_members" | "explicit");
     json(res, 200, { botId: params.botId, policy });
   });
 
@@ -251,7 +283,7 @@ function buildRoutes(): Route[] {
       eventType: url.searchParams.get("type") ?? undefined,
       projectId: url.searchParams.get("project") ?? undefined,
       since: url.searchParams.has("since") ? parseInt(url.searchParams.get("since")!, 10) : undefined,
-      limit: url.searchParams.has("limit") ? parseInt(url.searchParams.get("limit")!, 10) : undefined,
+      limit: url.searchParams.has("limit") ? Math.min(parseInt(url.searchParams.get("limit")!, 10) || 100, 10000) : undefined,
     });
     json(res, 200, entries);
   });
@@ -399,8 +431,9 @@ export function createRouter(): (req: IncomingMessage, res: ServerResponse, ctx:
       try {
         await r.handler(req, res, ctx, params);
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        json(res, 500, { error: message });
+        // Log full error server-side; return generic message to client
+        console.error("[safefence:admin] request error:", err);
+        json(res, 500, { error: "Internal server error" });
       }
       return;
     }

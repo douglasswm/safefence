@@ -196,8 +196,9 @@ export class ConfigRoleStore implements RoleStore {
     return undefined;
   }
 
-  resolveRole(_platform: string, platformId: string): PrincipalRole {
-    return inferRoleFromConfig(platformId, this.config);
+  resolveRole(platform: string, platformId: string): PrincipalRole {
+    // Reconstruct compound senderId for config comparison (ownerIds uses "platform:id" format)
+    return inferRoleFromConfig(`${platform}:${platformId}`, this.config);
   }
 
   ensureProject(): void {

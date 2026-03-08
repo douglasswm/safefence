@@ -120,7 +120,9 @@ export class ApprovalStore {
         if (!record || typeof record.requestId !== "string") {
           continue;
         }
-        if (record.expiresAt <= nowMs || record.usedAt) {
+        // Skip only fully expired records. Used-but-not-expired records
+        // must be loaded for replay detection.
+        if (record.expiresAt <= nowMs) {
           continue;
         }
         this.byRequestId.set(record.requestId, record);
@@ -143,8 +145,10 @@ export class ApprovalStore {
       fs.mkdirSync(dir, { recursive: true });
 
       const nowMs = Date.now();
+      // Persist both unused tokens (for redemption) AND used tokens (for replay detection).
+      // Only prune records that have fully expired.
       const records = Array.from(this.byRequestId.values()).filter(
-        (record) => !record.usedAt && record.expiresAt > nowMs
+        (record) => record.expiresAt > nowMs
       );
       const tempPath = `${this.storagePath}.tmp`;
       fs.writeFileSync(tempPath, JSON.stringify(records, null, 2), "utf8");

@@ -51,12 +51,16 @@ END;
 `;
 
 function canonicalJson(obj: Record<string, unknown>): string {
-  const keys = Object.keys(obj).sort();
-  const sorted: Record<string, unknown> = {};
-  for (const key of keys) {
-    sorted[key] = obj[key];
-  }
-  return JSON.stringify(sorted);
+  return JSON.stringify(obj, (_key, value) => {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const sorted: Record<string, unknown> = {};
+      for (const k of Object.keys(value as Record<string, unknown>).sort()) {
+        sorted[k] = (value as Record<string, unknown>)[k];
+      }
+      return sorted;
+    }
+    return value;
+  });
 }
 
 function sha256(input: string): string {
@@ -75,7 +79,9 @@ export class AuditStore {
     const BetterSqlite3 = require("better-sqlite3") as DatabaseConstructor;
     this.db = new BetterSqlite3(dbPath);
 
-    // Enable WAL mode for concurrent readers
+    // Exclusive locking prevents a second process from opening the audit DB
+    // and forking the hash chain. WAL mode allows concurrent reads within this process.
+    this.db.pragma("locking_mode = EXCLUSIVE");
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");
 

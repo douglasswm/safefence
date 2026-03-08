@@ -89,6 +89,19 @@ export function setConfigValue(config: GuardrailsConfig, dotPath: string, value:
   current[parts[parts.length - 1]] = value;
 }
 
+const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/** Recursively remove prototype pollution keys from an object. */
+function sanitizeObject(obj: Record<string, unknown>): void {
+  for (const key of Object.keys(obj)) {
+    if (DANGEROUS_KEYS.has(key)) {
+      delete obj[key];
+    } else if (obj[key] && typeof obj[key] === "object" && !Array.isArray(obj[key])) {
+      sanitizeObject(obj[key] as Record<string, unknown>);
+    }
+  }
+}
+
 /**
  * Parse a string value into the correct type for a policy field.
  */
@@ -111,8 +124,14 @@ export function parseFieldValue(field: PolicyFieldDef, raw: string): unknown {
       if (raw.startsWith("[")) return JSON.parse(raw) as string[];
       return raw.split(",").map((s) => s.trim()).filter(Boolean);
     }
-    case "json":
-      return JSON.parse(raw) as unknown;
+    case "json": {
+      const parsed = JSON.parse(raw) as unknown;
+      // Sanitize prototype pollution keys
+      if (parsed && typeof parsed === "object") {
+        sanitizeObject(parsed as Record<string, unknown>);
+      }
+      return parsed;
+    }
     default:
       return raw;
   }

@@ -67,5 +67,15 @@ export const DEFAULT_PII_PATTERNS = [
 ];
 
 export function compilePatterns(patterns: string[], flags = "giu"): RegExp[] {
-  return patterns.map((pattern) => new RegExp(pattern, flags));
+  const compiled: RegExp[] = [];
+  for (const pattern of patterns) {
+    try {
+      compiled.push(new RegExp(pattern, flags));
+    } catch (err) {
+      // Fail-closed: invalid patterns are skipped and logged, not silently ignored.
+      // This prevents a bad config from crashing the entire evaluation pipeline.
+      console.error(`[safefence] Invalid regex pattern skipped: ${pattern} — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return compiled;
 }
