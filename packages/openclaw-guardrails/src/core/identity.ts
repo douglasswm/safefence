@@ -1,3 +1,4 @@
+import type { RoleStore } from "./role-store.js";
 import type {
   ChannelType,
   GuardMetadata,
@@ -51,18 +52,42 @@ function normalizeChannelType(value: unknown): ChannelType {
   }
 }
 
+/**
+ * Parse a compound senderId (e.g. "telegram:12345") into platform and platformId.
+ * Returns undefined if the format doesn't match.
+ */
+function parseSenderId(senderId: string): { platform: string; platformId: string } | undefined {
+  const idx = senderId.indexOf(":");
+  if (idx <= 0 || idx === senderId.length - 1) return undefined;
+  return { platform: senderId.slice(0, idx), platformId: senderId.slice(idx + 1) };
+}
+
 function inferRole(
   senderId: string | undefined,
   explicitRole: PrincipalRole | undefined,
-  config: GuardrailsConfig
+  config: GuardrailsConfig,
+  roleStore?: RoleStore
 ): PrincipalRole {
-  // Privileged roles (owner/admin) MUST be derived from the trusted config
-  // id-lists, never from caller-supplied metadata. This prevents role spoofing
+  // Privileged roles (owner/admin) MUST be derived from trusted sources,
+  // never from caller-supplied metadata. This prevents role spoofing
   // where an attacker sets metadata.role = "owner" to bypass guardrails.
   if (!senderId) {
     return "unknown";
   }
 
+  // When a RoleStore is available, query it first for dynamic role resolution.
+  // This allows owners/admins to be managed via RBAC without gateway restarts.
+  if (roleStore) {
+    const parsed = parseSenderId(senderId);
+    if (parsed) {
+      const storeRole = roleStore.resolveRole(parsed.platform, parsed.platformId);
+      if (storeRole === "owner" || storeRole === "admin") {
+        return storeRole;
+      }
+    }
+  }
+
+  // Fall back to static config for bootstrap / non-RBAC deployments.
   if (config.principal.ownerIds.includes(senderId)) {
     return "owner";
   }
@@ -102,7 +127,8 @@ function pickConversationId(metadata: GuardMetadata): string {
 
 export function resolvePrincipalContext(
   metadata: GuardMetadata,
-  config: GuardrailsConfig
+  config: GuardrailsConfig,
+  roleStore?: RoleStore
 ): PrincipalResolution {
   const senderId = pickSenderId(metadata);
   const senderHandle =
@@ -111,7 +137,7 @@ export function resolvePrincipalContext(
     asString(metadata.username);
   const explicitRole =
     normalizeRole(metadata.principal?.role) ?? normalizeRole(metadata.role);
-  const role = inferRole(senderId, explicitRole, config);
+  const role = inferRole(senderId, explicitRole, config, roleStore);
   const channelType = normalizeChannelType(
     metadata.principal?.channelType ?? metadata.channelType
   );

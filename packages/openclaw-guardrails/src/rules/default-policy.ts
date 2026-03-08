@@ -174,7 +174,12 @@ export function createDefaultConfig(workspaceRoot: string): GuardrailsConfig {
       enabled: false,
       adminChannelId: undefined
     },
-    rbacStore: undefined
+    rbacStore: {
+      enabled: true,
+      dbPath: `${workspaceRoot}/.safefence/rbac.db`,
+      auditDbPath: `${workspaceRoot}/.safefence/audit.db`,
+      seedFromConfig: true,
+    }
   };
 }
 

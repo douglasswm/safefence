@@ -5,16 +5,19 @@
 
 import { createServer, type Server } from "node:http";
 import type { RoleStore } from "../core/role-store.js";
+import type { GuardrailsConfig } from "../core/types.js";
 import { createRouter } from "./routes.js";
 
 export interface AdminServerOptions {
   store: RoleStore;
   port?: number;
   apiKey?: string;
+  config?: GuardrailsConfig;
+  policyDefaults?: Map<string, unknown>;
 }
 
 export function createAdminServer(options: AdminServerOptions): Server {
-  const { store, port = 18790, apiKey } = options;
+  const { store, port = 18790, apiKey, config, policyDefaults } = options;
   const handleRequest = createRouter();
 
   const server = createServer(async (req, res) => {
@@ -29,7 +32,7 @@ export function createAdminServer(options: AdminServerOptions): Server {
       return;
     }
 
-    await handleRequest(req, res, { store, apiKey });
+    await handleRequest(req, res, { store, apiKey, config, policyDefaults });
   });
 
   server.listen(port, () => {

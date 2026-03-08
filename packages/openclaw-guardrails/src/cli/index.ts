@@ -16,6 +16,15 @@
 
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+import {
+  getConfigValue,
+  MUTABLE_POLICY_FIELDS,
+  MUTABLE_POLICY_KEYS,
+  parseFieldValue,
+  validateFieldValue,
+} from "../core/policy-fields.js";
+import { AUDIT_EVENT_TYPES } from "../core/types.js";
+import { createDefaultConfig } from "../rules/default-policy.js";
 import { extractFlag } from "../utils/args.js";
 
 function main(): void {
@@ -68,6 +77,12 @@ function main(): void {
       case "channel":
         handleChannel(args.slice(1), store);
         break;
+      case "setup":
+        handleSetup(args.slice(1), store);
+        break;
+      case "policy":
+        handlePolicy(args.slice(1), store);
+        break;
       default:
         console.error(`Unknown command: ${command}`);
         printHelp();
@@ -83,6 +98,8 @@ function printHelp(): void {
 SafeFence CLI — RBAC management for OpenClaw guardrails
 
 Commands:
+  setup                          First-time owner setup
+  policy list|get|set|reset      Manage runtime policy settings
   bot register|cap|access|list   Manage bot instances
   role create|delete|list|grant-perm|revoke-perm  Manage roles
   assign                         Assign a role to a user
@@ -350,6 +367,132 @@ function splitPlatformId(combined: string): [string, string] {
   const idx = combined.indexOf(":");
   if (idx === -1) return ["unknown", combined];
   return [combined.substring(0, idx), combined.substring(idx + 1)];
+}
+
+function handleSetup(args: string[], store: import("../core/sqlite-role-store.js").SqliteRoleStore): void {
+  const owner = extractFlag(args, "--owner");
+  if (!owner) {
+    console.error("Usage: safefence setup --owner <platform:id>");
+    console.error("Example: safefence setup --owner telegram:12345");
+    process.exit(1);
+  }
+
+  if (store.hasAnySuperadmin()) {
+    console.error("Setup already complete. An owner already exists.");
+    process.exit(1);
+  }
+
+  const orgId = "default-org";
+  const projectId = "default-project";
+  try { store.ensureProject(projectId, orgId, "Default Project"); } catch { /* may exist */ }
+
+  store.ensureUser(owner, undefined);
+  const [platform, platformId] = splitPlatformId(owner);
+  if (platform !== "unknown") {
+    store.linkPlatformIdentity(platform, platformId, owner);
+  }
+
+  const roles = store.listRoles(projectId);
+  const superadminRole = roles.find((r) => r.name === "superadmin" && r.isSystem);
+  if (!superadminRole) {
+    console.error("Error: superadmin role not found.");
+    process.exit(1);
+  }
+
+  store.assignRole(owner, superadminRole.id, "project", projectId, undefined, "system");
+
+  store.logDecision({
+    eventType: AUDIT_EVENT_TYPES.SETUP_BOOTSTRAP,
+    actorUserId: owner,
+    actorPlatform: platform,
+    actorPlatformId: platformId,
+    projectId,
+    details: { action: "first_owner_claim", source: "cli" }
+  });
+
+  console.log(`Setup complete. Owner registered: ${owner}`);
+  console.log(`Default project: ${projectId}`);
+}
+
+function handlePolicy(args: string[], store: import("../core/sqlite-role-store.js").SqliteRoleStore): void {
+  const sub = args[0];
+  // Use a default config to compute default values for display
+  const defaultConfig = createDefaultConfig(process.cwd());
+
+  switch (sub) {
+    case "list": {
+      const overrides = store.getAllPolicyOverrides();
+      if (overrides.length === 0) {
+        console.log("No policy overrides. All fields at defaults.");
+        return;
+      }
+      console.log("Active policy overrides:");
+      for (const o of overrides) {
+        console.log(`  ${o.key} = ${JSON.stringify(o.value)}${o.updatedBy ? ` (by ${o.updatedBy})` : ""}`);
+      }
+      break;
+    }
+
+    case "show": {
+      console.log("Mutable policy fields:");
+      for (const field of MUTABLE_POLICY_FIELDS) {
+        const override = store.getPolicyOverride(field.key);
+        const current = override ?? getConfigValue(defaultConfig, field.key);
+        const marker = override !== undefined ? " [overridden]" : "";
+        console.log(`  ${field.key} = ${JSON.stringify(current)}${marker}`);
+      }
+      break;
+    }
+
+    case "get": {
+      const key = args[1];
+      if (!key) { console.error("Usage: safefence policy get <key>"); process.exit(1); }
+      if (!MUTABLE_POLICY_KEYS.has(key)) { console.error(`Unknown policy key: ${key}`); process.exit(1); }
+      const override = store.getPolicyOverride(key);
+      const defaultVal = getConfigValue(defaultConfig, key);
+      console.log(`${key}:`);
+      console.log(`  Default:  ${JSON.stringify(defaultVal)}`);
+      console.log(`  Override: ${override !== undefined ? JSON.stringify(override) : "none"}`);
+      console.log(`  Effective: ${JSON.stringify(override ?? defaultVal)}`);
+      break;
+    }
+
+    case "set": {
+      const key = args[1];
+      const rawValue = args.slice(2).join(" ");
+      if (!key || !rawValue) { console.error("Usage: safefence policy set <key> <value>"); process.exit(1); }
+      if (!MUTABLE_POLICY_KEYS.has(key)) { console.error(`Unknown policy key: ${key}`); process.exit(1); }
+
+      const field = MUTABLE_POLICY_FIELDS.find((f) => f.key === key)!;
+      let parsed: unknown;
+      try {
+        parsed = parseFieldValue(field, rawValue);
+      } catch (err) {
+        console.error(`Invalid value: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+
+      const validationError = validateFieldValue(field, parsed);
+      if (validationError) { console.error(`Validation failed: ${validationError}`); process.exit(1); }
+
+      store.setPolicyOverride(key, parsed);
+      console.log(`Policy updated: ${key} = ${JSON.stringify(parsed)}`);
+      break;
+    }
+
+    case "reset": {
+      const key = args[1];
+      if (!key) { console.error("Usage: safefence policy reset <key>"); process.exit(1); }
+      if (!MUTABLE_POLICY_KEYS.has(key)) { console.error(`Unknown policy key: ${key}`); process.exit(1); }
+      store.deletePolicyOverride(key);
+      const defaultVal = getConfigValue(defaultConfig, key);
+      console.log(`Policy reset: ${key} = ${JSON.stringify(defaultVal)} (default)`);
+      break;
+    }
+
+    default:
+      console.log("Usage: safefence policy list|show|get|set|reset");
+  }
 }
 
 main();

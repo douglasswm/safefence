@@ -10,6 +10,7 @@
 
 import { randomUUID } from "node:crypto";
 import { AuditStore } from "./audit-store.js";
+import { MUTABLE_POLICY_KEYS } from "./policy-fields.js";
 import type { RoleStore } from "./role-store.js";
 import type { Database, DatabaseConstructor, Statement } from "./sqlite-types.js";
 import { AUDIT_EVENT_TYPES } from "./types.js";
@@ -22,6 +23,7 @@ import type {
   EffectivePermissions,
   GuardrailsConfig,
   PermissionCheck,
+  PrincipalRole,
   RbacRole,
   RbacRoleAssignment
 } from "./types.js";
@@ -154,6 +156,13 @@ CREATE TABLE IF NOT EXISTS role_assignments (
 
 CREATE INDEX IF NOT EXISTS idx_role_lookup ON role_assignments(user_id, scope_type, scope_id);
 CREATE INDEX IF NOT EXISTS idx_role_bot_lookup ON role_assignments(user_id, bot_instance_id);
+
+CREATE TABLE IF NOT EXISTS policy_overrides (
+  key         TEXT PRIMARY KEY,
+  value       TEXT NOT NULL,
+  updated_by  TEXT,
+  updated_at  INTEGER NOT NULL
+);
 `;
 
 // System-defined permissions seed data
@@ -185,6 +194,11 @@ const SYSTEM_PERMISSIONS: Array<{ id: string; category: string; action: string; 
 ];
 
 const SUPERADMIN_PERMS = SYSTEM_PERMISSIONS.map((p) => p.id);
+const ADMIN_PERMS = [
+  "tool_use:read", "tool_use:write", "tool_use:exec", "tool_use:apply_patch",
+  "data_access:public", "data_access:internal",
+  "admin:role_assign", "budget:view", "approval:approve"
+];
 const VIEWER_PERMS = ["tool_use:read", "data_access:public", "budget:view"];
 
 /** All concrete actions per category for wildcard expansion. */
@@ -321,15 +335,15 @@ export class SqliteRoleStore implements RoleStore {
       }
     }
 
-    for (const adminId of config.principal.adminIds) {
-      this.ensureUser(adminId, undefined);
-      const viewerRole = this.db.prepare(
-        "SELECT id FROM roles WHERE project_id = ? AND name = 'viewer'"
+    for (const cfgAdminId of config.principal.adminIds) {
+      this.ensureUser(cfgAdminId, undefined);
+      const adminRole = this.db.prepare(
+        "SELECT id FROM roles WHERE project_id = ? AND name = 'admin'"
       ).get(projectId);
-      if (viewerRole) {
+      if (adminRole) {
         this.db.prepare(
           "INSERT OR IGNORE INTO role_assignments (id, user_id, role_id, scope_type, scope_id, bot_instance_id, granted_by, created_at, expires_at) VALUES (?, ?, ?, 'project', ?, NULL, 'system', ?, NULL)"
-        ).run(randomUUID(), adminId, viewerRole.id as string, projectId, Date.now());
+        ).run(randomUUID(), cfgAdminId, adminRole.id as string, projectId, Date.now());
       }
     }
   }
@@ -346,6 +360,17 @@ export class SqliteRoleStore implements RoleStore {
       this.db.prepare(
         "INSERT OR IGNORE INTO role_permissions (role_id, permission_id, effect) VALUES (?, ?, 'allow')"
       ).run(superadminId, permId);
+    }
+
+    const adminId = `${projectId}:admin`;
+    this.db.prepare(
+      "INSERT OR IGNORE INTO roles (id, project_id, name, description, is_system, created_by, created_at) VALUES (?, ?, 'admin', 'Administrative access', 1, 'system', ?)"
+    ).run(adminId, projectId, Date.now());
+
+    for (const permId of ADMIN_PERMS) {
+      this.db.prepare(
+        "INSERT OR IGNORE INTO role_permissions (role_id, permission_id, effect) VALUES (?, ?, 'allow')"
+      ).run(adminId, permId);
     }
 
     const viewerId = `${projectId}:viewer`;
@@ -864,6 +889,33 @@ export class SqliteRoleStore implements RoleStore {
     return row?.user_id as string | undefined;
   }
 
+  resolveRole(platform: string, platformId: string): PrincipalRole {
+    const userId = this.resolveUserId(platform, platformId);
+    if (!userId) return "unknown";
+
+    const now = Date.now();
+    const assignments = this.db.prepare(
+      `SELECT r.name, r.is_system FROM role_assignments ra
+       JOIN roles r ON r.id = ra.role_id
+       WHERE ra.user_id = ?
+       AND (ra.expires_at IS NULL OR ra.expires_at > ?)`
+    ).all(userId, now) as Array<{ name: string; is_system: number }>;
+
+    if (assignments.length === 0) return "member";
+
+    // superadmin system role → owner
+    if (assignments.some((a) => a.name === "superadmin" && a.is_system === 1)) {
+      return "owner";
+    }
+
+    // admin system role → admin
+    if (assignments.some((a) => a.name === "admin" && a.is_system === 1)) {
+      return "admin";
+    }
+
+    return "member";
+  }
+
   // Project / channel management
 
   ensureProject(projectId: string, orgId: string, name: string): void {
@@ -985,6 +1037,69 @@ export class SqliteRoleStore implements RoleStore {
       createdAt: row.created_at as number,
       expiresAt: row.expires_at as number | undefined
     };
+  }
+
+  // Policy overrides
+
+  getPolicyOverride(key: string): unknown | undefined {
+    const row = this.db.prepare("SELECT value FROM policy_overrides WHERE key = ?").get(key);
+    if (!row) return undefined;
+    return JSON.parse(row.value as string) as unknown;
+  }
+
+  getAllPolicyOverrides(): Array<{ key: string; value: unknown; updatedBy?: string; updatedAt: number }> {
+    const rows = this.db.prepare("SELECT * FROM policy_overrides ORDER BY key").all();
+    return rows.map((r) => ({
+      key: r.key as string,
+      value: JSON.parse(r.value as string) as unknown,
+      updatedBy: r.updated_by as string | undefined,
+      updatedAt: r.updated_at as number
+    }));
+  }
+
+  setPolicyOverride(key: string, value: unknown, updatedBy?: string): void {
+    if (!MUTABLE_POLICY_KEYS.has(key)) {
+      throw new Error(`Policy key '${key}' is not a mutable field`);
+    }
+    const now = Date.now();
+    const previousRaw = this.db.prepare("SELECT value FROM policy_overrides WHERE key = ?").get(key);
+    const previous = previousRaw ? JSON.parse(previousRaw.value as string) : undefined;
+
+    this.db.prepare(
+      "INSERT OR REPLACE INTO policy_overrides (key, value, updated_by, updated_at) VALUES (?, ?, ?, ?)"
+    ).run(key, JSON.stringify(value), updatedBy ?? null, now);
+
+    this.logDecision({
+      eventType: AUDIT_EVENT_TYPES.POLICY_SET,
+      actorUserId: updatedBy,
+      details: { key, value, previous }
+    });
+  }
+
+  deletePolicyOverride(key: string): void {
+    const previousRaw = this.db.prepare("SELECT value, updated_by FROM policy_overrides WHERE key = ?").get(key);
+    if (!previousRaw) return;
+
+    this.db.prepare("DELETE FROM policy_overrides WHERE key = ?").run(key);
+
+    this.logDecision({
+      eventType: AUDIT_EVENT_TYPES.POLICY_DELETE,
+      actorUserId: previousRaw.updated_by as string | undefined,
+      details: { key, previous: JSON.parse(previousRaw.value as string) }
+    });
+  }
+
+  // Bootstrap
+
+  hasAnySuperadmin(): boolean {
+    const row = this.db.prepare(
+      `SELECT 1 FROM role_assignments ra
+       JOIN roles r ON r.id = ra.role_id
+       WHERE r.name = 'superadmin' AND r.is_system = 1
+       AND (ra.expires_at IS NULL OR ra.expires_at > ?)
+       LIMIT 1`
+    ).get(Date.now());
+    return row !== undefined;
   }
 
   close(): void {

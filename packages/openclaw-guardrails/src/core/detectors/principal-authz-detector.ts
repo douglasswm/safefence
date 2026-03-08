@@ -9,7 +9,7 @@ import type { DetectorContext } from "./types.js";
 
 export function detectPrincipalAuthz(context: DetectorContext): PrincipalAuthzResult {
   const { event, config, roleStore } = context;
-  const resolution = resolvePrincipalContext(event.metadata, config);
+  const resolution = resolvePrincipalContext(event.metadata, config, roleStore);
 
   event.metadata.principal = resolution.principal;
   event.metadata.principalMissingContext = resolution.missingContext;

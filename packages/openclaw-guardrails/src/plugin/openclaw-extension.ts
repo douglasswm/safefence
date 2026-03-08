@@ -12,9 +12,20 @@ import { randomUUID as generateUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { ConfigRoleStore } from "../core/config-role-store.js";
+import {
+  applyPolicyOverrides,
+  getConfigValue,
+  MUTABLE_POLICY_FIELDS,
+  MUTABLE_POLICY_KEYS,
+  parseFieldValue,
+  setConfigValue,
+  snapshotMutableDefaults,
+  validateFieldValue,
+} from "../core/policy-fields.js";
 import { extractFlag } from "../utils/args.js";
 import type { RoleStore } from "../core/role-store.js";
 import type { GuardrailsConfig } from "../core/types.js";
+import { AUDIT_EVENT_TYPES } from "../core/types.js";
 import { redactWithPatterns } from "../redaction/redact.js";
 import { createDefaultConfig, mergeConfig } from "../rules/default-policy.js";
 import { createOpenClawGuardrailsPlugin } from "./openclaw-adapter.js";
@@ -104,9 +115,9 @@ const plugin = {
     const workspaceRoot = rawConfig.workspaceRoot ?? process.cwd();
     const fullConfig = mergeConfig(createDefaultConfig(workspaceRoot), rawConfig);
 
-    // Initialize RoleStore based on config
+    // Initialize RoleStore based on merged config (RBAC store enabled by default)
     let roleStore: RoleStore | undefined;
-    const rbacConfig = rawConfig.rbacStore;
+    const rbacConfig = fullConfig.rbacStore;
     if (rbacConfig?.enabled) {
       try {
         const { SqliteRoleStore } = require("../core/sqlite-role-store.js") as { SqliteRoleStore: new (dbPath: string, auditDbPath: string, config?: GuardrailsConfig) => RoleStore };
@@ -127,6 +138,16 @@ const plugin = {
     // If no SQLite store, use config-based fallback
     if (!roleStore) {
       roleStore = new ConfigRoleStore(fullConfig);
+    }
+
+    // Snapshot mutable defaults before applying persisted overrides
+    const policyDefaults = snapshotMutableDefaults(fullConfig);
+
+    // Apply persisted policy overrides from the store
+    try {
+      applyPolicyOverrides(fullConfig, roleStore);
+    } catch {
+      log.warn("[guardrails] Failed to apply persisted policy overrides");
     }
 
     const guardrails = createOpenClawGuardrailsPlugin({ mergedConfig: fullConfig, roleStore });
@@ -285,7 +306,7 @@ const plugin = {
       acceptsArgs: true,
       requireAuth: true,
       handler: (ctx: PluginCommandContext) => {
-        return handleSfCommand(ctx, roleStore, mergedConfig, log);
+        return handleSfCommand(ctx, roleStore, mergedConfig, log, policyDefaults);
       },
     });
   },
@@ -298,15 +319,38 @@ const COMMAND_PERMISSIONS: Record<string, { category: string; action: string }> 
   revoke: { category: "admin", action: "role_assign" },
   bot: { category: "admin", action: "bot_manage" },
   channel: { category: "admin", action: "channel_manage" },
+  policy: { category: "guardrail", action: "configure" },
 };
 
 /** Read-only commands that only need the sender to be authorized. */
 const READ_ONLY_COMMANDS = new Set(["who", "audit", "help"]);
 
+function resolveCommandRole(
+  senderId: string,
+  config: GuardrailsConfig,
+  store?: RoleStore
+): "owner" | "admin" | "none" {
+  // Query RBAC store first for dynamic role resolution
+  if (store) {
+    const idx = senderId.indexOf(":");
+    if (idx > 0 && idx < senderId.length - 1) {
+      const storeRole = store.resolveRole(senderId.slice(0, idx), senderId.slice(idx + 1));
+      if (storeRole === "owner") return "owner";
+      if (storeRole === "admin") return "admin";
+    }
+  }
+
+  // Fall back to static config
+  if (config.principal.ownerIds.includes(senderId)) return "owner";
+  if (config.principal.adminIds.includes(senderId)) return "admin";
+  return "none";
+}
+
 function checkSfPermission(
   senderId: string,
   command: string,
-  config: GuardrailsConfig
+  config: GuardrailsConfig,
+  store?: RoleStore
 ): string | null {
   // Read-only commands only need the sender to be an authorized sender (owner/admin)
   if (READ_ONLY_COMMANDS.has(command)) return null;
@@ -314,11 +358,11 @@ function checkSfPermission(
   const requiredPerm = COMMAND_PERMISSIONS[command];
   if (!requiredPerm) return null; // unknown commands will error later
 
-  // Check if sender is owner (has all permissions)
-  if (config.principal.ownerIds.includes(senderId)) return null;
+  const role = resolveCommandRole(senderId, config, store);
 
-  // Check if sender is admin (limited permissions)
-  if (config.principal.adminIds.includes(senderId)) {
+  if (role === "owner") return null;
+
+  if (role === "admin") {
     // Admins can assign roles but not manage roles/bots/channels
     if (requiredPerm.action === "role_assign") return null;
     return `Permission denied: ${requiredPerm.category}:${requiredPerm.action} requires owner access.`;
@@ -331,7 +375,8 @@ function handleSfCommand(
   ctx: PluginCommandContext,
   store: RoleStore,
   config: GuardrailsConfig,
-  log: PluginLogger
+  log: PluginLogger,
+  policyDefaults?: Map<string, unknown>
 ): PluginCommandResult {
   const body = (ctx.commandBody ?? ctx.args ?? "").trim();
   const parts = body.split(/\s+/);
@@ -342,13 +387,19 @@ function handleSfCommand(
     return { text: sfHelp() };
   }
 
-  // Authorization check: sender must be owner/admin for management commands
   const senderId = ctx.senderId ?? "unknown";
+
+  // /sf setup bypasses normal auth — only available when no owner exists
+  if (sub === "setup") {
+    return handleSetupCommand(senderId, store, log);
+  }
+
+  // Authorization check: sender must be owner/admin for management commands
   if (!ctx.isAuthorizedSender) {
     return { text: "Permission denied: only authorized senders can use /sf commands." };
   }
 
-  const permError = checkSfPermission(senderId, sub, config);
+  const permError = checkSfPermission(senderId, sub, config, store);
   if (permError) {
     return { text: permError };
   }
@@ -362,6 +413,7 @@ function handleSfCommand(
       case "bot": return handleBotCommand(rest, store, ctx);
       case "channel": return handleChannelCommand(rest, store, ctx);
       case "audit": return handleAuditCommand(rest, store);
+      case "policy": return handlePolicyCommand(rest, store, config, senderId, policyDefaults);
       case "help": return { text: sfHelp() };
       default: return { text: `Unknown command: ${sub}\n\n${sfHelp()}` };
     }
@@ -371,9 +423,197 @@ function handleSfCommand(
   }
 }
 
+// ── /sf setup ──────────────────────────────────────────────
+
+function handleSetupCommand(
+  senderId: string,
+  store: RoleStore,
+  log: PluginLogger
+): PluginCommandResult {
+  if (senderId === "unknown") {
+    return { text: "Setup failed: could not identify sender. Please send from a platform account." };
+  }
+
+  if (store.hasAnySuperadmin()) {
+    return { text: "Setup already complete. An owner already exists." };
+  }
+
+  const orgId = "default-org";
+  const projectId = "default-project";
+
+  try {
+    store.ensureProject(projectId, orgId, "Default Project");
+  } catch {
+    // ensureProject may throw if org doesn't exist — create it first
+    try {
+      // The store should handle org creation via ensureProject
+      store.ensureProject(projectId, orgId, "Default Project");
+    } catch {
+      // ignore — project may already exist
+    }
+  }
+
+  // Parse platform:id format
+  const colonIdx = senderId.indexOf(":");
+  const platform = colonIdx > 0 ? senderId.slice(0, colonIdx) : "unknown";
+  const platformId = colonIdx > 0 ? senderId.slice(colonIdx + 1) : senderId;
+
+  store.ensureUser(senderId, undefined);
+  if (colonIdx > 0) {
+    store.linkPlatformIdentity(platform, platformId, senderId);
+  }
+
+  // Find or create superadmin role and assign
+  const roles = store.listRoles(projectId);
+  const superadminRole = roles.find((r) => r.name === "superadmin" && r.isSystem);
+
+  if (!superadminRole) {
+    return { text: "Setup failed: superadmin role not found. RBAC store may not be initialized." };
+  }
+
+  store.assignRole(senderId, superadminRole.id, "project", projectId, undefined, "system");
+
+  store.logDecision({
+    eventType: AUDIT_EVENT_TYPES.SETUP_BOOTSTRAP,
+    actorUserId: senderId,
+    actorPlatform: platform,
+    actorPlatformId: platformId,
+    projectId,
+    details: { action: "first_owner_claim" }
+  });
+
+  log.info(`[guardrails] First owner claimed: ${senderId}`);
+
+  return {
+    text: [
+      "SafeFence setup complete!",
+      "",
+      `Owner registered: ${senderId}`,
+      `Default project: ${projectId}`,
+      "",
+      "You can now:",
+      "  /sf policy set mode audit       — switch to audit mode",
+      "  /sf policy list                  — view all settings",
+      "  /sf policy set <key> <value>     — change a setting",
+      "  /sf assign --user <id> --role admin  — add admins",
+      "  /sf bot register ...             — register a bot",
+      "  /sf help                         — see all commands",
+    ].join("\n")
+  };
+}
+
+// ── /sf policy ─────────────────────────────────────────────
+
+function handlePolicyCommand(
+  args: string[],
+  store: RoleStore,
+  config: GuardrailsConfig,
+  senderId: string,
+  defaults?: Map<string, unknown>
+): PluginCommandResult {
+  const action = args[0]?.toLowerCase();
+
+  switch (action) {
+    case "list": {
+      const overrides = store.getAllPolicyOverrides();
+      if (overrides.length === 0) return { text: "No policy overrides. All fields at defaults." };
+      const lines = overrides.map((o) =>
+        `  ${o.key} = ${JSON.stringify(o.value)}${o.updatedBy ? ` (by ${o.updatedBy})` : ""}`
+      );
+      return { text: `Active policy overrides:\n${lines.join("\n")}` };
+    }
+
+    case "show": {
+      const lines = MUTABLE_POLICY_FIELDS.map((f) => {
+        const current = getConfigValue(config, f.key);
+        const override = store.getPolicyOverride(f.key);
+        const marker = override !== undefined ? " [overridden]" : "";
+        return `  ${f.key} = ${JSON.stringify(current)}${marker}`;
+      });
+      return { text: `Mutable policy fields:\n${lines.join("\n")}` };
+    }
+
+    case "get": {
+      const key = args[1];
+      if (!key) return { text: "Usage: /sf policy get <key>" };
+      if (!MUTABLE_POLICY_KEYS.has(key)) {
+        return { text: `Unknown policy key: ${key}\nUse /sf policy show to see available keys.` };
+      }
+      const current = getConfigValue(config, key);
+      const override = store.getPolicyOverride(key);
+      const defaultVal = defaults?.get(key);
+      return {
+        text: [
+          `${key}:`,
+          `  Current: ${JSON.stringify(current)}`,
+          override !== undefined ? `  Override: ${JSON.stringify(override)}` : "  Override: none",
+          `  Default: ${JSON.stringify(defaultVal)}`,
+        ].join("\n")
+      };
+    }
+
+    case "set": {
+      const key = args[1];
+      const rawValue = args.slice(2).join(" ");
+      if (!key || !rawValue) return { text: "Usage: /sf policy set <key> <value>" };
+      if (!MUTABLE_POLICY_KEYS.has(key)) {
+        return { text: `Unknown policy key: ${key}\nUse /sf policy show to see available keys.` };
+      }
+
+      const field = MUTABLE_POLICY_FIELDS.find((f) => f.key === key)!;
+      let parsed: unknown;
+      try {
+        parsed = parseFieldValue(field, rawValue);
+      } catch (err) {
+        return { text: `Invalid value for ${key}: ${err instanceof Error ? err.message : String(err)}` };
+      }
+
+      const validationError = validateFieldValue(field, parsed);
+      if (validationError) {
+        return { text: `Validation failed for ${key}: ${validationError}` };
+      }
+
+      store.setPolicyOverride(key, parsed, senderId);
+      setConfigValue(config, key, parsed);
+
+      return { text: `Policy updated: ${key} = ${JSON.stringify(parsed)}` };
+    }
+
+    case "reset": {
+      const key = args[1];
+      if (!key) return { text: "Usage: /sf policy reset <key>" };
+      if (!MUTABLE_POLICY_KEYS.has(key)) {
+        return { text: `Unknown policy key: ${key}\nUse /sf policy show to see available keys.` };
+      }
+
+      store.deletePolicyOverride(key);
+      const defaultVal = defaults?.get(key);
+      if (defaultVal !== undefined) {
+        setConfigValue(config, key, defaultVal);
+      }
+
+      return { text: `Policy reset: ${key} = ${JSON.stringify(defaultVal)} (default)` };
+    }
+
+    default:
+      return {
+        text: [
+          "Policy commands:",
+          "  /sf policy list              — show active overrides",
+          "  /sf policy show              — show all mutable fields",
+          "  /sf policy get <key>         — show a specific field",
+          "  /sf policy set <key> <value> — change a field",
+          "  /sf policy reset <key>       — revert to default",
+        ].join("\n")
+      };
+  }
+}
+
 function sfHelp(): string {
   return [
-    "SafeFence RBAC Commands:",
+    "SafeFence Commands:",
+    "  /sf setup                        — first-time owner setup",
+    "  /sf policy list|show|get|set|reset — manage policy settings",
     "  /sf role list|create|delete|permissions|grant-perm|revoke-perm",
     "  /sf assign <userId> <roleName> [--project <id>]",
     "  /sf revoke <assignmentId>",

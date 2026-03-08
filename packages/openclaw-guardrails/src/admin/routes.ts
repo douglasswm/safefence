@@ -5,11 +5,22 @@
 
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  getConfigValue,
+  MUTABLE_POLICY_FIELDS,
+  MUTABLE_POLICY_KEYS,
+  setConfigValue,
+  validateFieldValue,
+} from "../core/policy-fields.js";
 import type { RoleStore } from "../core/role-store.js";
+import type { GuardrailsConfig } from "../core/types.js";
+import { AUDIT_EVENT_TYPES } from "../core/types.js";
 
 export interface RouteContext {
   store: RoleStore;
   apiKey?: string;
+  config?: GuardrailsConfig;
+  policyDefaults?: Map<string, unknown>;
 }
 
 type RouteHandler = (
@@ -273,6 +284,114 @@ function buildRoutes(): Route[] {
     }
     ctx.store.linkPlatformIdentity(platform, platformId, params.userId);
     json(res, 201, { platform, platformId, userId: params.userId });
+  });
+
+  // ── Setup ──
+
+  route("POST", "/api/v1/setup", async (req, res, ctx) => {
+    if (ctx.store.hasAnySuperadmin()) {
+      json(res, 409, { error: "Setup already completed. An owner already exists." });
+      return;
+    }
+
+    const body = await readBody(req);
+    const owner = body.owner as string;
+    if (!owner) {
+      json(res, 400, { error: "owner is required (e.g. 'telegram:12345')" });
+      return;
+    }
+
+    const orgId = "default-org";
+    const projectId = "default-project";
+    try { ctx.store.ensureProject(projectId, orgId, "Default Project"); } catch { /* may exist */ }
+
+    ctx.store.ensureUser(owner, undefined);
+    const colonIdx = owner.indexOf(":");
+    if (colonIdx > 0) {
+      ctx.store.linkPlatformIdentity(owner.slice(0, colonIdx), owner.slice(colonIdx + 1), owner);
+    }
+
+    const roles = ctx.store.listRoles(projectId);
+    const superadminRole = roles.find((r) => r.name === "superadmin" && r.isSystem);
+    if (!superadminRole) {
+      json(res, 500, { error: "superadmin role not found" });
+      return;
+    }
+
+    ctx.store.assignRole(owner, superadminRole.id, "project", projectId, undefined, "system");
+
+    ctx.store.logDecision({
+      eventType: AUDIT_EVENT_TYPES.SETUP_BOOTSTRAP,
+      actorUserId: owner,
+      projectId,
+      details: { action: "first_owner_claim", source: "api" }
+    });
+
+    json(res, 200, { status: "ok", ownerId: owner, projectId });
+  });
+
+  // ── Policy ──
+
+  route("GET", "/api/v1/policy", async (_req, res, ctx) => {
+    const overrides = ctx.store.getAllPolicyOverrides();
+    const fields = MUTABLE_POLICY_FIELDS.map((f) => ({
+      key: f.key,
+      type: f.type,
+      description: f.description,
+      current: ctx.config ? getConfigValue(ctx.config, f.key) : undefined,
+      overridden: overrides.some((o) => o.key === f.key),
+    }));
+    json(res, 200, { fields, overrides });
+  });
+
+  route("GET", "/api/v1/policy/:key", async (_req, res, ctx, params) => {
+    const { key } = params;
+    if (!MUTABLE_POLICY_KEYS.has(key)) {
+      json(res, 404, { error: `Unknown policy key: ${key}` });
+      return;
+    }
+    const override = ctx.store.getPolicyOverride(key);
+    const current = ctx.config ? getConfigValue(ctx.config, key) : undefined;
+    const defaultVal = ctx.policyDefaults?.get(key);
+    json(res, 200, { key, current, override, default: defaultVal, overridden: override !== undefined });
+  });
+
+  route("PUT", "/api/v1/policy/:key", async (req, res, ctx, params) => {
+    const { key } = params;
+    if (!MUTABLE_POLICY_KEYS.has(key)) {
+      json(res, 404, { error: `Unknown policy key: ${key}` });
+      return;
+    }
+    const body = await readBody(req);
+    if (!("value" in body)) {
+      json(res, 400, { error: "Request body must include 'value'" });
+      return;
+    }
+    const field = MUTABLE_POLICY_FIELDS.find((f) => f.key === key)!;
+    const validationError = validateFieldValue(field, body.value);
+    if (validationError) {
+      json(res, 400, { error: `Validation failed: ${validationError}` });
+      return;
+    }
+
+    ctx.store.setPolicyOverride(key, body.value, body.updatedBy as string | undefined);
+    if (ctx.config) setConfigValue(ctx.config, key, body.value);
+
+    json(res, 200, { key, value: body.value });
+  });
+
+  route("DELETE", "/api/v1/policy/:key", async (_req, res, ctx, params) => {
+    const { key } = params;
+    if (!MUTABLE_POLICY_KEYS.has(key)) {
+      json(res, 404, { error: `Unknown policy key: ${key}` });
+      return;
+    }
+    ctx.store.deletePolicyOverride(key);
+    const defaultVal = ctx.policyDefaults?.get(key);
+    if (ctx.config && defaultVal !== undefined) {
+      setConfigValue(ctx.config, key, defaultVal);
+    }
+    json(res, 200, { key, value: defaultVal, reset: true });
   });
 
   return routes;

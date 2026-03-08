@@ -196,6 +196,10 @@ export class ConfigRoleStore implements RoleStore {
     return undefined;
   }
 
+  resolveRole(_platform: string, platformId: string): PrincipalRole {
+    return inferRoleFromConfig(platformId, this.config);
+  }
+
   ensureProject(): void {
     // noop
   }
@@ -218,6 +222,31 @@ export class ConfigRoleStore implements RoleStore {
 
   queryAudit(): AuditEntry[] {
     return [];
+  }
+
+  // Policy overrides — not supported without RBAC store
+
+  getPolicyOverride(): unknown | undefined {
+    return undefined;
+  }
+
+  getAllPolicyOverrides(): Array<{ key: string; value: unknown; updatedBy?: string; updatedAt: number }> {
+    return [];
+  }
+
+  setPolicyOverride(): void {
+    throw new Error("ConfigRoleStore does not support policy overrides. Enable rbacStore.");
+  }
+
+  deletePolicyOverride(): void {
+    throw new Error("ConfigRoleStore does not support policy overrides. Enable rbacStore.");
+  }
+
+  // Bootstrap
+
+  hasAnySuperadmin(): boolean {
+    // Config-based mode: owners exist if ownerIds is non-empty
+    return this.config.principal.ownerIds.length > 0;
   }
 
   close(): void {

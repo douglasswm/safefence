@@ -6,6 +6,7 @@ import type {
   DualAuthContext,
   EffectivePermissions,
   PermissionCheck,
+  PrincipalRole,
   RbacRole,
   RbacRoleAssignment
 } from "./types.js";
@@ -24,6 +25,13 @@ export interface RoleStore {
     ctx: DualAuthContext,
     permission: PermissionCheck
   ): { allowed: boolean; deniedBy: DeniedBy | null };
+
+  /**
+   * Resolve a platform user's PrincipalRole from the store.
+   * Returns "owner" for superadmin, "admin" for admin-level roles,
+   * "member" for any other assigned role, "unknown" if not found.
+   */
+  resolveRole(platform: string, platformId: string): PrincipalRole;
 
   // ═══════════════════════════════════════════
   // Management methods
@@ -136,6 +144,21 @@ export interface RoleStore {
     since?: number;
     limit?: number;
   }): AuditEntry[];
+
+  // ═══════════════════════════════════════════
+  // Policy overrides (runtime-mutable config)
+  // ═══════════════════════════════════════════
+
+  getPolicyOverride(key: string): unknown | undefined;
+  getAllPolicyOverrides(): Array<{ key: string; value: unknown; updatedBy?: string; updatedAt: number }>;
+  setPolicyOverride(key: string, value: unknown, updatedBy?: string): void;
+  deletePolicyOverride(key: string): void;
+
+  // ═══════════════════════════════════════════
+  // Bootstrap
+  // ═══════════════════════════════════════════
+
+  hasAnySuperadmin(): boolean;
 
   // ═══════════════════════════════════════════
   // Lifecycle

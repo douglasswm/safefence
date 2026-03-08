@@ -282,6 +282,11 @@ export const AUDIT_EVENT_TYPES = {
   BOT_ACCESS_CHANGE: "bot.access_change",
   CHANNEL_LINK: "channel.link",
   CHANNEL_UNLINK: "channel.unlink",
+  // Policy management
+  POLICY_SET: "policy.set",
+  POLICY_DELETE: "policy.delete",
+  // Setup
+  SETUP_BOOTSTRAP: "setup.bootstrap",
 } as const;
 
 export type AuditEventType = typeof AUDIT_EVENT_TYPES[keyof typeof AUDIT_EVENT_TYPES];
