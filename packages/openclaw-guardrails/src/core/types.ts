@@ -49,6 +49,29 @@ export interface GuardMetadata extends Record<string, unknown> {
   dataClass?: DataClass;
 }
 
+export interface ControlPlaneConfig {
+  /** Enable control plane sync. Default: false (standalone mode). */
+  enabled: boolean;
+  /** Control plane API endpoint (e.g., "https://api.safefence.io") */
+  endpoint: string;
+  /** Organization API key for authentication */
+  orgApiKey: string;
+  /** Instance tags for grouping (e.g., ["production", "us-east"]) */
+  tags?: string[];
+  /** Instance group ID for policy overrides */
+  groupId?: string;
+  /** Sync interval in ms for fallback polling (default: 30000) */
+  syncIntervalMs?: number;
+  /** Heartbeat interval in ms (default: 30000) */
+  heartbeatIntervalMs?: number;
+  /** Audit batch flush interval in ms (default: 5000) */
+  auditFlushIntervalMs?: number;
+  /** Max audit events per batch (default: 500) */
+  auditBatchSize?: number;
+  /** Path for persisting instance identity (default: ".safefence/instance.json") */
+  instanceDataPath?: string;
+}
+
 export interface GuardrailsConfig {
   mode: "enforce" | "audit";
   failClosed: boolean;
@@ -153,6 +176,7 @@ export interface GuardrailsConfig {
     adminChannelId?: string;
   };
   rbacStore?: RbacStoreConfig;
+  controlPlane?: ControlPlaneConfig;
 }
 
 export interface TokenUsageSummary {

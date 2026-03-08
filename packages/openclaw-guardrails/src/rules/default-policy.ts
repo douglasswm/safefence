@@ -179,7 +179,8 @@ export function createDefaultConfig(workspaceRoot: string): GuardrailsConfig {
       dbPath: `${workspaceRoot}/.safefence/rbac.db`,
       auditDbPath: `${workspaceRoot}/.safefence/audit.db`,
       seedFromConfig: true,
-    }
+    },
+    controlPlane: undefined,
   };
 }
 
@@ -281,6 +282,9 @@ export function mergeConfig(
     },
     rbacStore: overrides.rbacStore
       ? { ...(base.rbacStore ?? {}), ...overrides.rbacStore }
-      : base.rbacStore
+      : base.rbacStore,
+    controlPlane: overrides.controlPlane
+      ? { ...(base.controlPlane ?? { enabled: false, endpoint: "", orgApiKey: "" }), ...overrides.controlPlane }
+      : base.controlPlane,
   };
 }

@@ -9,3 +9,8 @@ export function extractFlag(args: string[], flag: string): string | null {
   if (idx === -1 || idx + 1 >= args.length) return null;
   return args[idx + 1];
 }
+
+/** Coerce an unknown caught value to an Error instance. */
+export function toError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
+}
