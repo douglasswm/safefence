@@ -689,12 +689,15 @@ export class SqliteRoleStore implements RoleStore {
     };
   }
 
-  setBotCapability(botInstanceId: string, permissionId: string, effect: "allow" | "deny"): void {
-    // Validate permissionId exists before insert
+  private assertPermissionExists(permissionId: string): void {
     const exists = this.db.prepare("SELECT 1 FROM permissions WHERE id = ?").get(permissionId);
     if (!exists) {
       throw new Error(`Unknown permission: ${permissionId}. Use a valid permission ID (e.g. tool_use:read).`);
     }
+  }
+
+  setBotCapability(botInstanceId: string, permissionId: string, effect: "allow" | "deny"): void {
+    this.assertPermissionExists(permissionId);
     this.db.prepare(
       `INSERT INTO bot_capabilities (bot_instance_id, permission_id, effect)
        VALUES (?, ?, ?)
@@ -767,11 +770,7 @@ export class SqliteRoleStore implements RoleStore {
   }
 
   grantRolePermission(roleId: string, permissionId: string, effect: "allow" | "deny"): void {
-    // Validate permissionId exists before insert
-    const exists = this.db.prepare("SELECT 1 FROM permissions WHERE id = ?").get(permissionId);
-    if (!exists) {
-      throw new Error(`Unknown permission: ${permissionId}. Use a valid permission ID (e.g. tool_use:read).`);
-    }
+    this.assertPermissionExists(permissionId);
     this.db.prepare(
       `INSERT INTO role_permissions (role_id, permission_id, effect)
        VALUES (?, ?, ?)

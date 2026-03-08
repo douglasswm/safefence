@@ -24,15 +24,6 @@ export function createAdminServer(options: AdminServerOptions): Server {
   }
 
   const server = createServer(async (req, res) => {
-    // No CORS headers — admin API is not intended for browser access.
-    // Clients should call from the same host via curl, CLI, or server-side code.
-
-    if (req.method === "OPTIONS") {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
-
     await handleRequest(req, res, { store, apiKey, config });
   });
 

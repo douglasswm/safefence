@@ -3,7 +3,7 @@
  * Maps HTTP requests to RoleStore operations.
  */
 
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   getConfigValue,
@@ -44,6 +44,7 @@ function json(res: ServerResponse, status: number, data: unknown): void {
 }
 
 const MAX_BODY_BYTES = 1_048_576; // 1 MB
+const VALID_ACCESS_POLICIES = new Set(["owner_only", "project_members", "explicit"]);
 
 async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
@@ -76,11 +77,10 @@ function checkAuth(req: IncomingMessage, apiKey: string | undefined): boolean {
     return false;
   }
   const auth = req.headers.authorization;
-  if (!auth || !apiKey) return false;
+  if (!auth) return false;
   // Constant-time comparison to prevent timing attacks
   const expected = `Bearer ${apiKey}`;
   if (auth.length !== expected.length) return false;
-  const { timingSafeEqual } = require("node:crypto") as typeof import("node:crypto");
   try {
     return timingSafeEqual(Buffer.from(auth), Buffer.from(expected));
   } catch {
@@ -156,8 +156,7 @@ function buildRoutes(): Route[] {
       json(res, 400, { error: "policy is required" });
       return;
     }
-    const validPolicies = new Set(["owner_only", "project_members", "explicit"]);
-    if (!validPolicies.has(policy)) {
+    if (!VALID_ACCESS_POLICIES.has(policy)) {
       json(res, 400, { error: "policy must be 'owner_only', 'project_members', or 'explicit'" });
       return;
     }
