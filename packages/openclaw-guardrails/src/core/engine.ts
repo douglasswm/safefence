@@ -183,7 +183,8 @@ export class GuardrailsEngine {
       }
 
       return decision;
-    } catch {
+    } catch (err) {
+      console.error("[safefence] Engine evaluation failed:", err);
       if (this.config.failClosed) {
         return {
           decision: "DENY",

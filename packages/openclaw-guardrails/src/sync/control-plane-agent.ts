@@ -19,6 +19,7 @@ import { StreamingAuditSink } from "./streaming-audit-sink.js";
 import { SyncRoleStore } from "./sync-role-store.js";
 import { toError } from "../utils/args.js";
 import type { InstanceIdentity, InstanceMetrics, SyncEvent } from "./types.js";
+import { HEARTBEAT_STATUS } from "./types.js";
 
 export interface ControlPlaneAgentOptions {
   controlPlaneConfig: ControlPlaneConfig;
@@ -181,8 +182,8 @@ export class ControlPlaneAgent {
 
     // Final flush
     this.streamingAuditSink.stop();
-    await this.streamingAuditSink.flush().catch(() => {});
-    await this.flushMutations().catch(() => {});
+    await this.streamingAuditSink.flush().catch((err) => { console.error("[safefence] Final audit flush failed:", err); });
+    await this.flushMutations().catch((err) => { console.error("[safefence] Final mutation flush failed:", err); });
 
     // Deregister
     try {
@@ -240,13 +241,13 @@ export class ControlPlaneAgent {
       ]);
     }
 
-    if (response.status === "STALE") {
+    if (response.status === HEARTBEAT_STATUS.STALE) {
       await Promise.all([this.policySyncLoop.pull(), this.rbacSyncLoop.pull()]);
-    } else if (response.status === "POLICY_STALE") {
+    } else if (response.status === HEARTBEAT_STATUS.POLICY_STALE) {
       await this.policySyncLoop.pull();
-    } else if (response.status === "RBAC_STALE") {
+    } else if (response.status === HEARTBEAT_STATUS.RBAC_STALE) {
       await this.rbacSyncLoop.pull();
-    } else if (response.status === "REVOKED") {
+    } else if (response.status === HEARTBEAT_STATUS.REVOKED) {
       this.setStatus("error");
       await this.stop();
     }

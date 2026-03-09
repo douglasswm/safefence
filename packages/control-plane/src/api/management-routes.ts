@@ -150,7 +150,7 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
     const body = parsed.data;
 
     const result = await db.transaction(async (tx) => {
-      const newVersion = await bumpPolicyVersion(tx, orgId);
+      const newVersion = await bumpVersion(tx, orgId, "policy");
 
       const [upserted] = await tx
         .insert(policyCurrent)
@@ -186,7 +186,7 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
       await tx.delete(policyCurrent).where(
         and(eq(policyCurrent.orgId, orgId), eq(policyCurrent.key, key), eq(policyCurrent.scope, POLICY_SCOPE.ORG))
       );
-      const newVersion = await bumpPolicyVersion(tx, orgId);
+      const newVersion = await bumpVersion(tx, orgId, "policy");
       return { key, deleted: true, version: newVersion };
     });
 
@@ -211,7 +211,7 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
       createdBy: body.createdBy,
     });
 
-    await bumpRbacVersion(db, orgId, broadcaster, "role_create", { roleId: id, name: body.name });
+    await bumpVersion(db, orgId, "rbac", broadcaster, "role_create", { roleId: id, name: body.name });
 
     return c.json({ id, name: body.name }, 201);
   });
@@ -226,7 +226,7 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
     const orgId = c.get("orgId");
     const roleId = c.req.param("roleId");
     await db.delete(cloudRoles).where(and(eq(cloudRoles.id, roleId), eq(cloudRoles.orgId, orgId)));
-    await bumpRbacVersion(db, orgId, broadcaster, "role_delete", { roleId });
+    await bumpVersion(db, orgId, "rbac", broadcaster, "role_delete", { roleId });
     return c.json({ ok: true });
   });
 
@@ -278,7 +278,7 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
       expiresAt: body.expiresAt ? new Date(body.expiresAt) : null,
     });
 
-    await bumpRbacVersion(db, orgId, broadcaster, "assignment_grant", { assignmentId: id, userId, roleId: body.roleId });
+    await bumpVersion(db, orgId, "rbac", broadcaster, "assignment_grant", { assignmentId: id, userId, roleId: body.roleId });
 
     return c.json({ id }, 201);
   });
@@ -319,42 +319,36 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
   return app;
 }
 
-/** Atomically bump policy version via SQL increment, returning the new version. */
-async function bumpPolicyVersion(db: Pick<Database, "update">, orgId: string): Promise<number> {
-  const result = await db.update(orgVersions)
-    .set({
-      policyVersion: sql`${orgVersions.policyVersion} + 1`,
-      updatedAt: new Date(),
-    })
-    .where(eq(orgVersions.orgId, orgId))
-    .returning({ policyVersion: orgVersions.policyVersion });
-  return result[0]?.policyVersion ?? 1;
-}
-
-/** Atomically bump RBAC version, record mutation, and publish notification. */
-async function bumpRbacVersion(
+/** Atomically bump a version counter, returning the new version. */
+async function bumpVersion(
   db: Pick<Database, "update" | "insert">,
   orgId: string,
-  broadcaster: SseBroadcaster,
-  mutationType: string,
-  payload: Record<string, unknown>,
-): Promise<void> {
-  const result = await db.update(orgVersions)
-    .set({
-      rbacVersion: sql`${orgVersions.rbacVersion} + 1`,
-      updatedAt: new Date(),
-    })
-    .where(eq(orgVersions.orgId, orgId))
-    .returning({ rbacVersion: orgVersions.rbacVersion });
-  const newVersion = result[0]?.rbacVersion ?? 1;
+  type: "policy" | "rbac",
+  broadcaster?: SseBroadcaster,
+  mutationType?: string,
+  payload?: Record<string, unknown>,
+): Promise<number> {
+  const result = type === "rbac"
+    ? await db.update(orgVersions)
+        .set({ rbacVersion: sql`${orgVersions.rbacVersion} + 1`, updatedAt: new Date() })
+        .where(eq(orgVersions.orgId, orgId))
+        .returning({ version: orgVersions.rbacVersion })
+    : await db.update(orgVersions)
+        .set({ policyVersion: sql`${orgVersions.policyVersion} + 1`, updatedAt: new Date() })
+        .where(eq(orgVersions.orgId, orgId))
+        .returning({ version: orgVersions.policyVersion });
+  const newVersion = result[0]?.version ?? 1;
 
-  await db.insert(rbacMutations).values({
-    id: randomUUID(),
-    orgId,
-    version: newVersion,
-    mutationType,
-    payload,
-  });
+  if (type === "rbac" && broadcaster && mutationType && payload) {
+    await db.insert(rbacMutations).values({
+      id: randomUUID(),
+      orgId,
+      version: newVersion,
+      mutationType,
+      payload,
+    });
+    await broadcaster.publish(orgId, { type: "rbac_changed", version: newVersion });
+  }
 
-  await broadcaster.publish(orgId, { type: "rbac_changed", version: newVersion });
+  return newVersion;
 }

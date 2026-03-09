@@ -166,6 +166,13 @@ export interface RoleStore {
    */
   bootstrapOwner(senderId: string, source?: string): import("./bootstrap.js").BootstrapResult;
 
+  /**
+   * Run a function inside a single DB transaction.
+   * On SqliteRoleStore this uses better-sqlite3 transactions for bulk write efficiency.
+   * On other implementations this is a no-op wrapper.
+   */
+  runInTransaction(fn: () => void): void;
+
   // ═══════════════════════════════════════════
   // Lifecycle
   // ═══════════════════════════════════════════

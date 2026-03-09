@@ -22,6 +22,7 @@ import {
   auditEvents,
   INSTANCE_STATUS,
 } from "../db/schema.js";
+import { HEARTBEAT_STATUS } from "@safefence/types";
 import { createInstanceToken } from "../auth/jwt.js";
 import { resolveOrgByApiKey } from "../auth/api-key.js";
 import { instanceAuth } from "../auth/middleware.js";
@@ -127,7 +128,7 @@ export function createSyncRoutes(db: Database, broadcaster: SseBroadcaster): Hon
     const policyStale = policyVersion < currentPolicy;
     const rbacStale = rbacVersion < currentRbac;
     const forceResync = policyStale && rbacStale;
-    const status = forceResync ? "STALE" : policyStale ? "POLICY_STALE" : rbacStale ? "RBAC_STALE" : "OK";
+    const status = forceResync ? HEARTBEAT_STATUS.STALE : policyStale ? HEARTBEAT_STATUS.POLICY_STALE : rbacStale ? HEARTBEAT_STATUS.RBAC_STALE : HEARTBEAT_STATUS.OK;
 
     return c.json({ status, forceResync });
   });
@@ -269,7 +270,7 @@ export function createSyncRoutes(db: Database, broadcaster: SseBroadcaster): Hon
 
     if (events && events.length > 0) {
       await db.insert(auditEvents).values(
-        events.map((e: any) => ({
+        events.map((e) => ({
           // L2: Always use server-generated IDs
           id: randomUUID(),
           orgId,

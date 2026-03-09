@@ -68,6 +68,10 @@ export class SyncRoleStore implements RoleStore {
     }
   }
 
+  runInTransaction(fn: () => void): void {
+    this.inner.runInTransaction(fn);
+  }
+
   private queueMutation(type: MutationType, payload: Record<string, unknown>): void {
     if (!this._queuingEnabled) return;
     if (this.mutationQueue.length >= this.maxQueueSize) {

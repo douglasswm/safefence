@@ -53,10 +53,11 @@ export interface InstanceMetrics {
   uptimeS: number;
 }
 
-export type HeartbeatStatus = "OK" | "POLICY_STALE" | "RBAC_STALE" | "STALE" | "REVOKED";
+export type { HeartbeatStatus } from "@safefence/types";
+export { HEARTBEAT_STATUS } from "@safefence/types";
 
 export interface HeartbeatResponse {
-  status: HeartbeatStatus;
+  status: import("@safefence/types").HeartbeatStatus;
   forceResync?: boolean;
 }
 

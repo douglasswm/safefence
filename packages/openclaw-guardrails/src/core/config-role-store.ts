@@ -254,6 +254,10 @@ export class ConfigRoleStore implements RoleStore {
     return this.config.principal.ownerIds.length > 0;
   }
 
+  runInTransaction(fn: () => void): void {
+    fn();
+  }
+
   close(): void {
     // noop
   }

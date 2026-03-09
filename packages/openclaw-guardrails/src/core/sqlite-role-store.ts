@@ -158,6 +158,9 @@ CREATE TABLE IF NOT EXISTS role_assignments (
 
 CREATE INDEX IF NOT EXISTS idx_role_lookup ON role_assignments(user_id, scope_type, scope_id);
 CREATE INDEX IF NOT EXISTS idx_role_bot_lookup ON role_assignments(user_id, bot_instance_id);
+CREATE INDEX IF NOT EXISTS idx_role_permissions_role ON role_permissions(role_id);
+CREATE INDEX IF NOT EXISTS idx_bot_capabilities_bot ON bot_capabilities(bot_instance_id);
+CREATE INDEX IF NOT EXISTS idx_permissions_lookup ON permissions(category, action);
 
 CREATE TABLE IF NOT EXISTS policy_overrides (
   key         TEXT PRIMARY KEY,
@@ -1144,6 +1147,10 @@ export class SqliteRoleStore implements RoleStore {
     return this.db.transaction(() => {
       return executeBootstrap(this, senderId, source);
     })();
+  }
+
+  runInTransaction(fn: () => void): void {
+    this.db.transaction(fn)();
   }
 
   close(): void {

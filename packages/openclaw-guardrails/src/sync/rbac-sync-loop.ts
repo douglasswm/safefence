@@ -51,8 +51,10 @@ export class RbacSyncLoop {
 
   /** Apply RBAC changes to local RoleStore (bypasses mutation queuing). */
   private applyRbac(response: RbacSyncResponse): void {
-    // Use withoutQueuing to prevent echoing cloud data back as local mutations
+    // Use withoutQueuing to prevent echoing cloud data back as local mutations.
+    // Wrap in a transaction so all inserts flush as a single disk write.
     this.syncRoleStore.withoutQueuing(() => {
+      this.syncRoleStore.runInTransaction(() => {
       // Apply users first (dependency for assignments)
       for (const user of response.users) {
         this.syncRoleStore.ensureUser(user.id, user.displayName);
@@ -115,6 +117,7 @@ export class RbacSyncLoop {
           // Assignment may already exist (idempotent)
         }
       }
-    });
+      }); // runInTransaction
+    }); // withoutQueuing
   }
 }

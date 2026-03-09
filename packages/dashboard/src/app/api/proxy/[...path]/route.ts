@@ -31,9 +31,13 @@ async function proxyRequest(
   if (contentType) headers["Content-Type"] = contentType;
   headers["Authorization"] = auth;
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+
   const init: RequestInit = {
     method: request.method,
     headers,
+    signal: controller.signal,
   };
 
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -46,6 +50,7 @@ async function proxyRequest(
 
   try {
     const upstream_res = await fetch(upstream, init);
+    clearTimeout(timeoutId);
 
     return new NextResponse(upstream_res.body, {
       status: upstream_res.status,
@@ -54,9 +59,11 @@ async function proxyRequest(
       },
     });
   } catch (err) {
+    clearTimeout(timeoutId);
+    const isTimeout = err instanceof Error && err.name === "AbortError";
     return NextResponse.json(
-      { error: "Control plane unreachable" },
-      { status: 502 },
+      { error: isTimeout ? "Control plane request timed out" : "Control plane unreachable" },
+      { status: isTimeout ? 504 : 502 },
     );
   }
 }
