@@ -11,6 +11,11 @@ dist/
 coverage/
 **/coverage/
 *.tsbuildinfo
+.next/
+**/.next/
+
+# Next.js auto-generated
+next-env.d.ts
 
 # Lockfiles (only root pnpm-lock.yaml is authoritative)
 packages/*/pnpm-lock.yaml
