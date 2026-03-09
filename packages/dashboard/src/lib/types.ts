@@ -3,13 +3,24 @@
  * Derived from Drizzle schema at control-plane/src/db/schema.ts.
  */
 
+export type InstanceStatus = "registered" | "active" | "deregistered" | "stale";
+export type PolicyScope = "org" | "group" | "instance";
+export type AuditDecision = "allow" | "deny";
+
+export const INSTANCE_STATUS = {
+  REGISTERED: "registered" as const,
+  ACTIVE: "active" as const,
+  DEREGISTERED: "deregistered" as const,
+  STALE: "stale" as const,
+};
+
 export interface Instance {
   id: string;
   orgId: string;
   groupId: string | null;
   pluginVersion: string | null;
   tags: string[];
-  status: string;
+  status: InstanceStatus;
   policyVersion: number;
   rbacVersion: number;
   auditCursor: number;

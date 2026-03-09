@@ -2,6 +2,7 @@
 
 import { useApiClient } from "../lib/auth-context";
 import { useFetch } from "../lib/use-fetch";
+import { INSTANCE_STATUS } from "../lib/types";
 import { ErrorBanner } from "../components/ui";
 
 export default function OverviewPage() {
@@ -10,7 +11,7 @@ export default function OverviewPage() {
   const stats = useFetch(() => api.getAuditStats());
 
   const cards = [
-    { label: "Connected Instances", value: instances.data?.filter((i) => i.status === "active").length ?? "—" },
+    { label: "Connected Instances", value: instances.data?.filter((i) => i.status === INSTANCE_STATUS.ACTIVE).length ?? "—" },
     { label: "Total Evaluations", value: stats.data?.total ?? "—" },
     { label: "Denied Requests", value: stats.data?.denied ?? "—" },
     { label: "Allowed Requests", value: stats.data?.allowed ?? "—" },

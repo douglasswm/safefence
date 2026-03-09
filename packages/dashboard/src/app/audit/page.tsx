@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useApiClient } from "../../lib/auth-context";
 import { useFetch } from "../../lib/use-fetch";
-import { ErrorBanner, StatusBadge, TableEmptyRow } from "../../components/ui";
+import { ErrorBanner, StatusBadge, TableHeader, TableEmptyRow } from "../../components/ui";
 
 const decisionColors: Record<string, string> = {
   allow: "#22c55e",
@@ -54,15 +54,7 @@ export default function AuditPage() {
         />
       </div>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-        <thead>
-          <tr style={{ borderBottom: "1px solid #1e1e1e" }}>
-            {["Timestamp", "Instance", "Event Type", "Decision", "Actor", "Details"].map((h) => (
-              <th key={h} style={{ padding: "12px 16px", textAlign: "left", color: "#888", fontWeight: 500 }}>
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
+        <TableHeader columns={["Timestamp", "Instance", "Event Type", "Decision", "Actor", "Details"]} />
         <tbody>
           {loading && <TableEmptyRow colSpan={6}>Loading...</TableEmptyRow>}
           {filtered && filtered.length === 0 && (

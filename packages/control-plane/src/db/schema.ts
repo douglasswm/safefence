@@ -20,6 +20,36 @@ import {
 import { relations } from "drizzle-orm";
 
 // ═══════════════════════════════════════════
+// Shared constants
+// ═══════════════════════════════════════════
+
+export type InstanceStatus = "registered" | "active" | "deregistered" | "stale";
+export type PolicyScope = "org" | "group" | "instance";
+export type AuditDecision = "allow" | "deny";
+export type PlanTier = "free" | "pro" | "enterprise";
+export type AssignmentScopeType = "project" | "global";
+export type PermissionEffect = "allow" | "deny";
+export type BotAccessPolicy = "owner_only" | "team" | "public";
+
+export const INSTANCE_STATUS = {
+  REGISTERED: "registered" as const,
+  ACTIVE: "active" as const,
+  DEREGISTERED: "deregistered" as const,
+  STALE: "stale" as const,
+};
+
+export const POLICY_SCOPE = {
+  ORG: "org" as const,
+  GROUP: "group" as const,
+  INSTANCE: "instance" as const,
+};
+
+export const AUDIT_DECISION = {
+  ALLOW: "allow" as const,
+  DENY: "deny" as const,
+};
+
+// ═══════════════════════════════════════════
 // Organizations
 // ═══════════════════════════════════════════
 

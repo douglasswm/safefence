@@ -5,7 +5,7 @@ import { useApiClient } from "../../lib/auth-context";
 import { useFetch } from "../../lib/use-fetch";
 import { RoleForm } from "../../components/role-form";
 import { ConfirmButton } from "../../components/confirm-button";
-import { ErrorBanner } from "../../components/ui";
+import { ErrorBanner, TableHeader } from "../../components/ui";
 
 export default function RbacPage() {
   const api = useApiClient();
@@ -102,13 +102,7 @@ export default function RbacPage() {
           {roles.data?.length === 0 && <p style={{ color: "#666", fontSize: 13 }}>No roles defined.</p>}
           {roles.data && roles.data.length > 0 && (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid #1e1e1e" }}>
-                  {["Name", "Description", ""].map((h) => (
-                    <th key={h} style={{ padding: "8px 8px", textAlign: "left", color: "#888", fontWeight: 500 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
+              <TableHeader columns={["Name", "Description", ""]} />
               <tbody>
                 {roles.data.map((role) => (
                   <tr key={role.id} style={{ borderBottom: "1px solid #1a1a1a" }}>
@@ -183,13 +177,7 @@ export default function RbacPage() {
           {users.data?.length === 0 && <p style={{ color: "#666", fontSize: 13 }}>No users registered.</p>}
           {users.data && users.data.length > 0 && (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid #1e1e1e" }}>
-                  {["User", "Created", "Assign Role"].map((h) => (
-                    <th key={h} style={{ padding: "8px", textAlign: "left", color: "#888", fontWeight: 500 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
+              <TableHeader columns={["User", "Created", "Assign Role"]} />
               <tbody>
                 {users.data.map((user) => (
                   <tr key={user.id} style={{ borderBottom: "1px solid #1a1a1a" }}>

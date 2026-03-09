@@ -42,6 +42,20 @@ export function StatusBadge({
   );
 }
 
+export function TableHeader({ columns }: { columns: string[] }) {
+  return (
+    <thead>
+      <tr style={{ borderBottom: "1px solid #1e1e1e" }}>
+        {columns.map((h) => (
+          <th key={h} style={{ padding: "12px 16px", textAlign: "left", color: "#888", fontWeight: 500 }}>
+            {h}
+          </th>
+        ))}
+      </tr>
+    </thead>
+  );
+}
+
 export function TableEmptyRow({
   colSpan,
   children,

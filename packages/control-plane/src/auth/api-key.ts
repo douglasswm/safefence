@@ -27,24 +27,27 @@ export async function verifyApiKey(key: string, hash: string): Promise<boolean> 
 /**
  * Resolve an org ID from an API key.
  * Uses api_key_prefix for O(1) lookup when available,
- * falls back to O(n) scan for legacy orgs without prefix.
+ * falls back to parallel scan for legacy orgs without prefix.
  */
 export async function resolveOrgByApiKey(db: Database, key: string): Promise<string | null> {
   const prefix = key.slice(0, 8);
 
-  // Fast path: lookup by prefix
+  // Fast path: lookup by prefix (typically 0-1 rows)
   const byPrefix = await db.select().from(organizations)
     .where(eq(organizations.apiKeyPrefix, prefix));
-  for (const org of byPrefix) {
-    if (await verifyApiKey(key, org.apiKeyHash)) return org.id;
-  }
+  const prefixResults = await Promise.all(
+    byPrefix.map(async (org) => (await verifyApiKey(key, org.apiKeyHash)) ? org.id : null),
+  );
+  const prefixMatch = prefixResults.find(Boolean);
+  if (prefixMatch) return prefixMatch;
 
-  // Slow path: scan orgs without prefix (backward compat for pre-migration orgs)
+  // Slow path: parallel scan of legacy orgs without prefix
   const legacy = await db.select().from(organizations)
     .where(isNull(organizations.apiKeyPrefix));
-  for (const org of legacy) {
-    if (await verifyApiKey(key, org.apiKeyHash)) return org.id;
-  }
+  if (legacy.length === 0) return null;
 
-  return null;
+  const legacyResults = await Promise.all(
+    legacy.map(async (org) => (await verifyApiKey(key, org.apiKeyHash)) ? org.id : null),
+  );
+  return legacyResults.find(Boolean) ?? null;
 }

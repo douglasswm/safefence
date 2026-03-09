@@ -5,7 +5,7 @@ import { useApiClient } from "../../lib/auth-context";
 import { useFetch } from "../../lib/use-fetch";
 import { PolicyEditor } from "../../components/policy-editor";
 import { ConfirmButton } from "../../components/confirm-button";
-import { ErrorBanner, TableEmptyRow } from "../../components/ui";
+import { ErrorBanner, TableHeader, TableEmptyRow } from "../../components/ui";
 
 export default function PoliciesPage() {
   const api = useApiClient();
@@ -67,15 +67,7 @@ export default function PoliciesPage() {
       </p>
 
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14, marginBottom: 32 }}>
-        <thead>
-          <tr style={{ borderBottom: "1px solid #1e1e1e" }}>
-            {["Key", "Value", "Scope", "Version", "Updated", ""].map((h) => (
-              <th key={h} style={{ padding: "12px 16px", textAlign: "left", color: "#888", fontWeight: 500 }}>
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
+        <TableHeader columns={["Key", "Value", "Scope", "Version", "Updated", ""]} />
         <tbody>
           {policies.loading && <TableEmptyRow colSpan={6}>Loading...</TableEmptyRow>}
           {policies.data?.length === 0 && <TableEmptyRow colSpan={6}>No policies configured.</TableEmptyRow>}
@@ -105,13 +97,7 @@ export default function PoliciesPage() {
         )}
         {versions.data && versions.data.length > 0 && (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid #1e1e1e" }}>
-                {["Key", "Value", "Version", "Changed By", "Changed At"].map((h) => (
-                  <th key={h} style={{ padding: "8px 12px", textAlign: "left", color: "#888", fontWeight: 500 }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
+            <TableHeader columns={["Key", "Value", "Version", "Changed By", "Changed At"]} />
             <tbody>
               {versions.data.map((v) => (
                 <tr key={v.id} style={{ borderBottom: "1px solid #1a1a1a" }}>

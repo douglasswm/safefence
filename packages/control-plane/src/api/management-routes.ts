@@ -22,6 +22,9 @@ import {
   cloudBots,
   rbacMutations,
   auditEvents,
+  INSTANCE_STATUS,
+  POLICY_SCOPE,
+  AUDIT_DECISION,
 } from "../db/schema.js";
 import { generateApiKey, hashApiKey } from "../auth/api-key.js";
 import { apiKeyAuth } from "../auth/middleware.js";
@@ -66,7 +69,7 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
   authed.delete("/orgs/:orgId/instances/:id", async (c) => {
     const instanceId = c.req.param("id");
     await db.update(instances)
-      .set({ status: "deregistered" })
+      .set({ status: INSTANCE_STATUS.DEREGISTERED })
       .where(eq(instances.id, instanceId));
     // Notify instance
     await broadcaster.publish(c.get("orgId"), { type: "revoked" });
@@ -118,7 +121,7 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
     // Upsert policy
     const id = randomUUID();
     const existing = await db.select().from(policyCurrent).where(
-      and(eq(policyCurrent.orgId, orgId), eq(policyCurrent.key, key), eq(policyCurrent.scope, "org"))
+      and(eq(policyCurrent.orgId, orgId), eq(policyCurrent.key, key), eq(policyCurrent.scope, POLICY_SCOPE.ORG))
     );
 
     // Atomic version bump via SQL increment
@@ -131,17 +134,17 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
 
       await db.insert(policyVersions).values({
         id: randomUUID(), orgId, policyId: existing[0].id, key,
-        value: body.value, scope: "org", version: newVersion, changedBy: body.updatedBy,
+        value: body.value, scope: POLICY_SCOPE.ORG, version: newVersion, changedBy: body.updatedBy,
       });
     } else {
       await db.insert(policyCurrent).values({
-        id, orgId, key, value: body.value, scope: "org",
+        id, orgId, key, value: body.value, scope: POLICY_SCOPE.ORG,
         version: newVersion, updatedBy: body.updatedBy,
       });
 
       await db.insert(policyVersions).values({
         id: randomUUID(), orgId, policyId: id, key,
-        value: body.value, scope: "org", version: newVersion, changedBy: body.updatedBy,
+        value: body.value, scope: POLICY_SCOPE.ORG, version: newVersion, changedBy: body.updatedBy,
       });
     }
 
@@ -155,7 +158,7 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
     const key = c.req.param("key");
 
     await db.delete(policyCurrent).where(
-      and(eq(policyCurrent.orgId, orgId), eq(policyCurrent.key, key), eq(policyCurrent.scope, "org"))
+      and(eq(policyCurrent.orgId, orgId), eq(policyCurrent.key, key), eq(policyCurrent.scope, POLICY_SCOPE.ORG))
     );
 
     const newVersion = await bumpPolicyVersion(db, orgId);
@@ -271,8 +274,8 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
 
     const stats = await db.select({
       total: sql<number>`count(*)`,
-      denied: sql<number>`count(*) filter (where decision = 'deny')`,
-      allowed: sql<number>`count(*) filter (where decision = 'allow')`,
+      denied: sql<number>`count(*) filter (where decision = ${AUDIT_DECISION.DENY})`,
+      allowed: sql<number>`count(*) filter (where decision = ${AUDIT_DECISION.ALLOW})`,
     }).from(auditEvents).where(eq(auditEvents.orgId, orgId));
 
     return c.json(stats[0] ?? { total: 0, denied: 0, allowed: 0 });
