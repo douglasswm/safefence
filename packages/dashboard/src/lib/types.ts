@@ -16,6 +16,17 @@ export const INSTANCE_STATUS = {
   STALE: "stale" as const,
 };
 
+export const POLICY_SCOPE = {
+  ORG: "org" as const,
+  GROUP: "group" as const,
+  INSTANCE: "instance" as const,
+};
+
+export const AUDIT_DECISION = {
+  ALLOW: "allow" as const,
+  DENY: "deny" as const,
+};
+
 export interface Instance {
   id: string;
   orgId: string;

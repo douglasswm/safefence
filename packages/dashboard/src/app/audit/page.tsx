@@ -4,10 +4,12 @@ import { useState } from "react";
 import { useApiClient } from "../../lib/auth-context";
 import { useFetch } from "../../lib/use-fetch";
 import { ErrorBanner, StatusBadge, TableHeader, TableEmptyRow } from "../../components/ui";
+import { AUDIT_DECISION } from "../../lib/types";
+import type { AuditDecision } from "../../lib/types";
 
-const decisionColors: Record<string, string> = {
-  allow: "#22c55e",
-  deny: "#ef4444",
+const decisionColors: Record<AuditDecision, string> = {
+  [AUDIT_DECISION.ALLOW]: "#22c55e",
+  [AUDIT_DECISION.DENY]: "#ef4444",
 };
 
 export default function AuditPage() {

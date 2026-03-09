@@ -102,7 +102,7 @@ export default function RbacPage() {
           {roles.data?.length === 0 && <p style={{ color: "#666", fontSize: 13 }}>No roles defined.</p>}
           {roles.data && roles.data.length > 0 && (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <TableHeader columns={["Name", "Description", ""]} />
+              <TableHeader columns={["Name", "Description", ""]} padding="8px" />
               <tbody>
                 {roles.data.map((role) => (
                   <tr key={role.id} style={{ borderBottom: "1px solid #1a1a1a" }}>
@@ -177,7 +177,7 @@ export default function RbacPage() {
           {users.data?.length === 0 && <p style={{ color: "#666", fontSize: 13 }}>No users registered.</p>}
           {users.data && users.data.length > 0 && (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <TableHeader columns={["User", "Created", "Assign Role"]} />
+              <TableHeader columns={["User", "Created", "Assign Role"]} padding="8px" />
               <tbody>
                 {users.data.map((user) => (
                   <tr key={user.id} style={{ borderBottom: "1px solid #1a1a1a" }}>

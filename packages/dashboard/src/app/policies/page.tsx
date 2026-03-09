@@ -97,7 +97,7 @@ export default function PoliciesPage() {
         )}
         {versions.data && versions.data.length > 0 && (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <TableHeader columns={["Key", "Value", "Version", "Changed By", "Changed At"]} />
+            <TableHeader columns={["Key", "Value", "Version", "Changed By", "Changed At"]} padding="8px 12px" />
             <tbody>
               {versions.data.map((v) => (
                 <tr key={v.id} style={{ borderBottom: "1px solid #1a1a1a" }}>

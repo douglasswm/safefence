@@ -11,7 +11,7 @@ export default function OverviewPage() {
   const stats = useFetch(() => api.getAuditStats());
 
   const cards = [
-    { label: "Connected Instances", value: instances.data?.filter((i) => i.status === INSTANCE_STATUS.ACTIVE).length ?? "—" },
+    { label: "Connected Instances", value: instances.data?.filter((i) => i.status === INSTANCE_STATUS.CONNECTED || i.status === INSTANCE_STATUS.ACTIVE).length ?? "—" },
     { label: "Total Evaluations", value: stats.data?.total ?? "—" },
     { label: "Denied Requests", value: stats.data?.denied ?? "—" },
     { label: "Allowed Requests", value: stats.data?.allowed ?? "—" },
