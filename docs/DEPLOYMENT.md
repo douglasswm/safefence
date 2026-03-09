@@ -160,11 +160,9 @@ curl -s http://localhost:3100/api/v1/orgs/<orgId>/audit/stats \
 
 ---
 
-## Dashboard (Status: Scaffold)
+## Dashboard
 
-The dashboard is a Next.js application that provides a UI shell with five pages: overview, instances, policies, RBAC, and audit.
-
-**Important:** The dashboard currently has **no API integration**. All pages display hardcoded placeholder content. It is a static scaffold intended for future development.
+The dashboard is a Next.js application with five pages: overview, instances, policies, RBAC, and audit. All pages display live data via a server-side proxy to the control plane.
 
 To run it:
 
@@ -173,7 +171,7 @@ pnpm --filter @safefence/dashboard dev
 # → http://localhost:3200
 ```
 
-You'll see the UI layout, but no live data from the control plane.
+Log in with your org ID and API key (`sf_...`) from Step 3. See [packages/dashboard/README.md](../packages/dashboard/README.md) for details.
 
 ---
 
@@ -181,25 +179,137 @@ You'll see the UI layout, but no live data from the control plane.
 
 | Variable | Default | Required | Description |
 |----------|---------|----------|-------------|
+| `JWT_SECRET` | — | **Yes** | HMAC-SHA256 secret for instance JWT tokens. Server will not start without it. **Change in production.** |
+| `DATABASE_URL` | `postgres://user:password@localhost:5432/safefence` | Yes (prod) | PostgreSQL connection string |
+| `REDIS_URL` | `redis://localhost:6379` | No | Redis connection for rate limiting and SSE pub/sub |
+| `REDIS_PASSWORD` | `safefence-dev` | No | Redis auth password (keep in sync with `REDIS_URL`) |
 | `PORT` | `3100` | No | Control plane HTTP server port |
-| `DATABASE_URL` | `postgresql://localhost:5432/safefence` | Yes (production) | PostgreSQL connection string |
-| `REDIS_URL` | `redis://localhost:6379` | Yes (production) | Redis connection for SSE pub/sub |
-| `JWT_SECRET` | `safefence-dev-secret-change-in-production` | **Yes** | HMAC secret for instance JWT tokens. **Change this in production.** |
+| `CORS_ORIGIN` | `http://localhost:3200` | No | Allowed CORS origin (dashboard URL) |
+| `BOOTSTRAP_SECRET` | — | No | If set, org creation requires matching `X-Bootstrap-Secret` header |
 
-The `docker-compose.yml` sets these automatically for local development. For production, set them as real environment variables or via your deployment platform's secrets management.
+A `.env.example` template is provided at `packages/control-plane/.env.example`. The `docker-compose.yml` sets all variables automatically for local development. For production, inject them via your deployment platform's secrets management.
 
-There are currently no `.env.example` files in the repository.
+---
+
+## Security
+
+### Rate Limiting
+
+Redis-backed sliding window rate limiter with three tiers (most-specific first):
+
+| Tier | Path | Limit | Identifier |
+|------|------|-------|------------|
+| Public | `POST /api/v1/orgs` | 10 req/min | IP address |
+| Management | `/api/v1/*` | 100 req/min | org ID (or IP) |
+| Sync | `/api/v1/sync/*` | 600 req/min | org ID (or IP) |
+
+Rejected requests return `429` with `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, and `Retry-After` response headers.
+
+### Security Headers
+
+All responses include:
+
+| Header | Value |
+|--------|-------|
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `DENY` |
+| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `X-XSS-Protection` | `0` |
+
+### Input Validation
+
+All management and sync endpoints validate request bodies via Zod schemas. Invalid payloads return `400` with structured error details listing each failing field.
+
+### API Key Authentication
+
+Org API keys are bcrypt-hashed. An 8-character prefix column enables O(1) row lookup before bcrypt verification, keeping authentication fast even at scale.
+
+### Bootstrap Secret
+
+Set `BOOTSTRAP_SECRET` to gate org creation in production. Without a valid `X-Bootstrap-Secret` header, `POST /api/v1/orgs` returns `403`.
+
+### TLS Enforcement (Agent Side)
+
+The guardrails agent enforces HTTPS for all non-localhost control plane connections by default (`requireTls: true` in production). Override with `requireTls: false` for development tunnels. See the [Config Reference](../packages/openclaw-guardrails/docs/CONFIG.md) for the `controlPlane.requireTls` option.
+
+### Container Security
+
+The control plane Docker image runs as a non-root `app` user. Base image: `node:22-alpine`.
+
+### Redis Authentication
+
+Redis starts with a password in docker-compose. Set `REDIS_PASSWORD` and include it in `REDIS_URL` (e.g., `redis://:password@localhost:6379`).
 
 ---
 
 ## Current Limitations
 
-- **Dashboard has no API integration** -- all five pages are static scaffolds with hardcoded placeholder data. The architecture diagram shows "Dashboard <-> REST API" but this connection does not exist in code yet.
 - **Mutation sync is advisory** -- when instances push local mutations (e.g., `/sf policy set`), the server currently discards them. Cloud-wins semantics; local mutations are not persisted centrally.
-- **JWT tokens expire in 24h with no refresh** -- instance tokens are issued on registration with a hardcoded 24-hour expiry (`HS256`). There is no token refresh mechanism; instances must re-register after expiry.
-- **API key lookup is O(n) bcrypt** -- org API key verification iterates all keys and runs bcrypt comparison on each. This is fine for small deployments but does not scale. A prefix-based lookup column is planned.
+- **JWT tokens expire in 24h with no refresh** -- instance tokens are issued with a hardcoded 24-hour expiry (`HS256`). There is no token refresh mechanism; instances must re-register after expiry.
 - **RBAC delta sync falls back to full snapshot** -- the sync protocol supports delta pulls, but the current implementation always sends the full RBAC state.
-- **No `.env.example` files** -- environment variable documentation exists only in this guide and in `docker-compose.yml`.
+
+---
+
+## Sync Protocol Flow
+
+```mermaid
+sequenceDiagram
+    participant A as Guardrails Agent
+    participant CP as Control Plane
+    participant PG as PostgreSQL
+    participant RD as Redis
+
+    A->>CP: POST /sync/register (orgApiKey, instanceId)
+    CP->>PG: insert/update instance, check org membership
+    CP-->>A: { jwt, policyVersion, rbacVersion }
+
+    A->>CP: GET /sync/events (SSE, Bearer jwt)
+    Note over A,CP: Long-lived SSE connection
+
+    Note over CP,RD: Admin sets policy via dashboard
+    CP->>PG: upsert policy_current, bump org_versions
+    CP->>RD: PUBLISH safefence:sync:{orgId} policy_changed
+    RD-->>CP: broadcast to SSE connections
+    CP-->>A: event: policy_changed { version: N }
+
+    A->>CP: GET /sync/policies?since=N (Bearer jwt)
+    CP->>PG: select policies updated after version N
+    CP-->>A: [{ key, value, scope, version }]
+
+    A->>CP: POST /sync/ack { policyVersion: N }
+    CP->>PG: update instance.policy_version = N
+
+    loop Every 5 seconds
+        A->>CP: POST /sync/audit/batch { events[], cursor }
+        CP->>PG: insert audit_events (server-generated IDs)
+        CP-->>A: { accepted, cursor }
+    end
+
+    loop Every 60 seconds
+        A->>CP: POST /sync/heartbeat { policyVersion, rbacVersion }
+        CP->>PG: update instance.last_heartbeat_at
+        CP-->>A: { stale: false }
+    end
+```
+
+## Instance Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> registered : POST /sync/register
+    registered --> active : first heartbeat received
+    active --> connected : SSE connection established
+    connected --> active : SSE disconnected (still heartbeating)
+    active --> disconnected : POST /sync/deregister
+    connected --> disconnected : POST /sync/deregister
+    active --> stale : heartbeat timeout (no heartbeat for threshold)
+    connected --> stale : heartbeat timeout
+    stale --> active : heartbeat resumes
+    disconnected --> registered : re-register (same instanceId)
+    disconnected --> deregistered : admin DELETE /instances/:id
+    stale --> deregistered : admin DELETE /instances/:id
+```
 
 ---
 

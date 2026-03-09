@@ -1,5 +1,16 @@
 # Migration Guide
 
+## v0.8.0 → current (security hardening)
+
+1. **TLS enforcement (agent side)**: `ControlPlaneHttpClient` now rejects non-HTTPS control plane endpoints for non-localhost hosts when `NODE_ENV=production`. The check is a startup-time guard — if your endpoint uses `http://` and is not localhost, the agent will throw on startup.
+
+   - **No action needed** for most deployments: localhost development (`http://localhost:3100`) is always permitted.
+   - **Action needed** if you use a plain HTTP endpoint in production: either switch the endpoint to `https://` (recommended), or set `requireTls: false` in your `controlPlane` config block as an explicit override.
+
+2. **No other breaking changes**: All control plane REST endpoints, sync protocol, audit format, RBAC store, and plugin APIs are unchanged.
+
+---
+
 ## v0.7.1 → v0.8.0
 
 1. **Control plane sync (opt-in)**: New `controlPlane` config section enables centralized policy, RBAC, and audit management. Default is `controlPlane.enabled: false` — no behavioral change for existing deployments. When enabled, the plugin registers with a control plane server and syncs state via REST + SSE.

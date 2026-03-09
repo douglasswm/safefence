@@ -19,89 +19,62 @@ Detailed technical documentation for `@safefence/openclaw-guardrails`.
 
 The plugin has three layers: `openclaw-extension.ts` registers typed hooks with OpenClaw, `event-adapter.ts` maps between OpenClaw's structured `(event, ctx)` pairs and the internal `OpenClawContext`, and `openclaw-adapter.ts` converts contexts into `GuardEvent`s for the engine.
 
-```
-OpenClaw Runtime
-  │
-  ▼
-openclaw-extension.ts ──► api.on(hookName, handler)
-  │
-  ├──► event-adapter.ts: map*(event, ctx) → OpenClawContext
-  │
-  ▼
-openclaw-adapter.ts
-  │  toEvent(phase, ctx) → GuardEvent
-  │  RoleStore.checkPermission() → dual-auth gate
-  │
-  ▼
-GuardrailsEngine ──► engine.evaluate(guardEvent, phase)
-  │
-  ▼
-GuardDecision
-  │
-  ▼
-openclaw-adapter.ts
-  │  applyRolloutPolicy()
-  │  updateMetrics()
-  │
-  ▼
-OpenClawHookResult
-  │
-  ▼
-event-adapter.ts: mapTo*Result(hookResult) → typed result
-  │
-  ▼
-OpenClaw Runtime ◄── hook-specific return value
+```mermaid
+flowchart TD
+    OC["OpenClaw Runtime"]
+    EXT["openclaw-extension.ts\napi.on(hookName, handler)"]
+    EA_IN["event-adapter.ts\nmap*(event, ctx) → OpenClawContext"]
+    OCA["openclaw-adapter.ts\ntoEvent(phase, ctx) → GuardEvent\nRoleStore.checkPermission() → dual-auth gate"]
+    GE["GuardrailsEngine\nengine.evaluate(guardEvent, phase)"]
+    GD["GuardDecision"]
+    OCA2["openclaw-adapter.ts\napplyRolloutPolicy()\nupdateMetrics()"]
+    EA_OUT["event-adapter.ts\nmapTo*Result(hookResult) → typed result"]
+    OC2["OpenClaw Runtime\nhook-specific return value"]
+
+    OC --> EXT
+    EXT --> EA_IN
+    EA_IN --> OCA
+    OCA --> GE
+    GE --> GD
+    GD --> OCA2
+    OCA2 --> EA_OUT
+    EA_OUT --> OC2
 ```
 
 ## Hook Lifecycle
 
 Six lifecycle hooks span the full agent interaction. Each hook has different blocking/redaction capabilities:
 
-```
-User / Channel          OpenClaw              Guardrails Plugin
-      │                    │                        │
-      │     ┌──────────────────────────────────────────────────────┐
-      │     │ 1. Agent Initialization                              │
-      │     │    OC ──► before_agent_start(prompt, agentCtx)       │
-      │     │    OC ◄── { prependSystemContext: securityPolicy }   │
-      │     │    Injects immutable security prompt                 │
-      │     └──────────────────────────────────────────────────────┘
-      │                    │                        │
-      │     ┌──────────────────────────────────────────────────────┐
-      │     │ 2. Inbound Message                                   │
-      │ ──► │    OC ──► message_received(from, content, channelCtx)│
-      │     │    OC ◄── void (observe-only, cannot block)          │
-      │     │    Audits violations, defers enforcement             │
-      │     └──────────────────────────────────────────────────────┘
-      │                    │                        │
-      │     ┌──────────────────────────────────────────────────────┐
-      │     │ 3. Tool Execution Gate                               │
-      │     │    OC ──► before_tool_call(toolName, params, agentCtx│
-      │     │    OC ◄── { block: true, blockReason } or {}         │
-      │     │    *** Primary enforcement point ***                 │
-      │     └──────────────────────────────────────────────────────┘
-      │                    │                        │
-      │     ┌──────────────────────────────────────────────────────┐
-      │     │ 4. Tool Result Persistence                           │
-      │     │    OC ──► tool_result_persist(message, toolCtx)      │
-      │     │    OC ◄── { message: { content: redacted } } or {}   │
-      │     │    Sync regex redaction; async engine eval for audit  │
-      │     └──────────────────────────────────────────────────────┘
-      │                    │                        │
-      │     ┌──────────────────────────────────────────────────────┐
-      │     │ 5. Outbound Message Gate                             │
-      │     │    OC ──► message_sending(content, channelCtx)       │
-      │     │    OC ◄── { cancel: true } or { content: redacted }  │
-      │     │    Blocks system prompt leaks                        │
-      │     │    Always enforced in stage_b rollout                │
-      │     └──────────────────────────────────────────────────────┘
-      │                    │                        │
-      │     ┌──────────────────────────────────────────────────────┐
-      │     │ 6. Session End                                       │
-      │     │    OC ──► agent_end(messages, success, agentCtx)     │
-      │     │    OC ◄── void (observe-only)                        │
-      │     │    Emits metrics + monitoring snapshot               │
-      │     └──────────────────────────────────────────────────────┘
+```mermaid
+sequenceDiagram
+    participant U as User / Channel
+    participant OC as OpenClaw
+    participant GP as Guardrails Plugin
+
+    OC->>GP: before_agent_start(prompt, agentCtx)
+    GP-->>OC: { prependSystemContext: securityPolicy }
+    Note over OC,GP: Injects immutable security prompt
+
+    U->>OC: message
+    OC->>GP: message_received(from, content, channelCtx)
+    GP-->>OC: void — observe only, cannot block
+    Note over OC,GP: Audits violations, defers enforcement
+
+    OC->>GP: before_tool_call(toolName, params, agentCtx)
+    GP-->>OC: { block: true, blockReason } or {}
+    Note over OC,GP: Primary enforcement point
+
+    OC->>GP: tool_result_persist(message, toolCtx)
+    GP-->>OC: { message: { content: redacted } } or {}
+    Note over OC,GP: Sync regex redaction; async engine eval for audit
+
+    OC->>GP: message_sending(content, channelCtx)
+    GP-->>OC: { cancel: true } or { content: redacted } or {}
+    Note over OC,GP: Blocks system prompt leaks; always enforced in stage_b
+
+    OC->>GP: agent_end(messages, success, agentCtx)
+    GP-->>OC: void — observe only
+    Note over OC,GP: Emits metrics + monitoring snapshot
 ```
 
 ### Hook Capability Matrix
@@ -119,37 +92,25 @@ User / Channel          OpenClaw              Guardrails Plugin
 
 All 12 detectors run sequentially for every `engine.evaluate()` call. No short-circuiting — an early DENY does not skip later detectors. All hits are merged, then `DENY > REDACT > ALLOW` precedence determines the outcome.
 
-```
-Engine.evaluate()
-  │
-  │  normalizeGuardEvent(rawEvent)
-  │
-  ├──► D1  Input Intent ── size limits, injection, exfil, context probes ──► hits[]
-  ├──► D2  Command Policy ── tool allowlist, binary allowlist, shell ops ──► hits[]
-  │        (before_tool_call only)
-  ├──► D3  Path Canonical ── path traversal, workspace boundary, symlinks ──► hits[]
-  │        (async realpath, before_tool_call only)
-  ├──► D4  Network Egress ── host allowlist, private egress, DNS ──► hits[]
-  │        (async DNS, before_tool_call only)
-  ├──► D5  Provenance ── supply chain trust + retrieval trust ──► hits[]
-  │        (async, before_tool_call only)
-  ├──► D6  Principal Authz ── dual-auth (user RBAC ∩ bot caps), mention-gating ──► hits[] + approvalRequirement?
-  │        (anti-spoofing: owner/admin derived from config only)
-  ├──► D7  Owner Approval ── challenge/verify approval token ──► hits[] + approvalChallenge?
-  │        (only runs if D6 returned approvalRequirement)
-  ├──► D8  Sensitive Data ── secret patterns → PII patterns (cascaded) ──► hits[] + redactedContent?
-  ├──► D9  Restricted Info ── data-class redaction for non-owner principals ──► hits[] + redactedContent?
-  ├──► D10 Output Safety ── prompt leak, injected filenames, suspicious patterns ──► hits[] + redactedContent?
-  │        (receives pre-redacted content from D9/D8)
-  ├──► D11 Budget ── requests/min + tool calls/min (sliding window) ──► hits[]
-  └──► D12 Extensions ── external HTTP + custom validators ──► hits[]
-           (concurrent via Promise.all, custom validators fail-open)
-  │
-  │  decideFromHits(): DENY > REDACT > ALLOW
-  │  aggregateRisk(): 1 - exp(-weighted_sum)
-  │  finalizeDecision(): audit mode override
-  │  auditSink.append() if enabled
-  ▼
+```mermaid
+flowchart TD
+    IN["engine.evaluate()\nnormalizeGuardEvent(rawEvent)"]
+
+    D1["D1 Input Intent\nsize limits · injection · exfil · context probes"]
+    D2["D2 Command Policy\ntool allowlist · binary allowlist · shell ops\n(before_tool_call only)"]
+    D3["D3 Path Canonical\npath traversal · workspace boundary · symlinks\n(async, before_tool_call only)"]
+    D4["D4 Network Egress\nhost allowlist · private egress · DNS\n(async, before_tool_call only)"]
+    D5["D5 Provenance\nsupply chain trust · retrieval trust\n(async, before_tool_call only)"]
+    D6["D6 Principal Authz\ndual-auth: user RBAC ∩ bot caps · mention-gating\n→ approvalRequirement?"]
+    D7["D7 Owner Approval\nchallenge / verify approval token\n(only if D6 returned approvalRequirement)"]
+    D8["D8 Sensitive Data\nsecret patterns → PII patterns (cascaded)\n→ redactedContent?"]
+    D9["D9 Restricted Info\ndata-class redaction for non-owner principals\n→ redactedContent?"]
+    D10["D10 Output Safety\nprompt leak · injected filenames · suspicious patterns\nreceives pre-redacted content from D8/D9\n→ redactedContent?"]
+    D11["D11 Budget\nrequests/min + tool calls/min (sliding window)"]
+    D12["D12 Extensions\nexternal HTTP + custom validators\n(concurrent via Promise.all, fail-open)"]
+    DECIDE["decideFromHits(): DENY > REDACT > ALLOW\naggregateRisk(): 1 - exp(-weighted_sum)\nfinalizeDecision(): audit mode override\nauditSink.append() if enabled"]
+
+    IN --> D1 --> D2 --> D3 --> D4 --> D5 --> D6 --> D7 --> D8 --> D9 --> D10 --> D11 --> D12 --> DECIDE
 ```
 
 ### Detector Details
@@ -202,49 +163,18 @@ decision = ALLOW                                 │      │
 
 When `rbacStore.enabled` is true, the principal authorization detector (D6) uses the persistent RoleStore instead of config-based role inference. Every request goes through dual authorization:
 
-```
-Human A: "@Bot-B delete file X" in Group G
-                    │
-         ┌──────────▼──────────┐
-         │ 1. Identify entities │
-         │    sender → user_id  │
-         │    bot → bot_instance│
-         │    channel → project │
-         └──────────┬──────────┘
-                    │
-         ┌──────────▼──────────┐
-         │ 2. Bot access policy │
-         │    owner_only?       │
-         │    project_members?  │
-         │    explicit?         │
-         └──────────┬──────────┘
-                    │
-         ┌──────────▼──────────┐
-         │ 3. User RBAC        │
-         │    role_assignments  │
-         │    → deny-overrides  │
-         └──────────┬──────────┘
-                    │
-         ┌──────────▼──────────┐
-         │ 4. Bot capabilities  │
-         │    capability ceiling│
-         │    (default: allow)  │
-         └──────────┬──────────┘
-                    │
-         ┌──────────▼──────────┐
-         │ 5. Intersection     │
-         │    user ∩ bot = eff. │
-         └──────────┬──────────┘
-                    │
-         ┌──────────▼──────────┐
-         │ 6. Audit log        │
-         │    hash-chained     │
-         │    (separate DB)    │
-         └──────────┬──────────┘
-                    │
-                    ▼
-         Guardrails pipeline
-         (12 detectors, unchanged)
+```mermaid
+flowchart TD
+    REQ["Human A: '@Bot-B delete file X' in Group G"]
+    ID["1. Identify entities\nsender → user_id\nbot → bot_instance\nchannel → project"]
+    BAP["2. Bot access policy\nowner_only? project_members? explicit?"]
+    URBAC["3. User RBAC\nrole_assignments → deny-overrides"]
+    BCAP["4. Bot capabilities\ncapability ceiling (default: allow)"]
+    INTER["5. Intersection\nuser ∩ bot = effective permissions"]
+    AUDIT["6. Audit log\nhash-chained (separate DB)"]
+    PIPE["Guardrails pipeline\n(12 detectors, unchanged)"]
+
+    REQ --> ID --> BAP --> URBAC --> BCAP --> INTER --> AUDIT --> PIPE
 ```
 
 ### Permission Categories
@@ -538,32 +468,46 @@ When `controlPlane.enabled` is true, a `ControlPlaneAgent` wraps the existing `R
 
 ### Sync Architecture
 
+```mermaid
+flowchart TD
+    subgraph CPA ["ControlPlaneAgent (orchestrator)"]
+        SRS["SyncRoleStore\nwraps SqliteRoleStore\nWrite ops queue LocalMutation\nwithoutQueuing() for remote-applied changes"]
+        SAS["StreamingAuditSink\nwraps AuditSink\nappend() writes locally + buffers\nflush() sends batch, acks cursor"]
+        PSL["PolicySyncLoop\nSSE 'policy_changed'\n→ pull delta → apply to config + store"]
+        RSL["RbacSyncLoop\nSSE 'rbac_changed'\n→ pull snapshot → apply to local store"]
+        SSE["SseClient\nauto-reconnect + exponential backoff\npolicy_changed · rbac_changed\nforce_resync · revoked"]
+        HTTP["ControlPlaneHttpClient\nregister / heartbeat / deregister\npullPolicies / pullRbac\npushAuditBatch / pushMutations / ack"]
+    end
+
+    SSE --> PSL
+    SSE --> RSL
+    PSL --> HTTP
+    RSL --> HTTP
+    SAS --> HTTP
+    SRS --> HTTP
 ```
-ControlPlaneAgent (orchestrator)
-  │
-  ├── SyncRoleStore (wraps SqliteRoleStore)
-  │     ├── All RoleStore methods delegate to inner store
-  │     ├── Write operations queue LocalMutation for upstream sync
-  │     └── withoutQueuing() bypasses queue for remote-applied changes
-  │
-  ├── StreamingAuditSink (wraps AuditSink)
-  │     ├── append() writes locally + buffers for upstream
-  │     └── flush() sends batch via REST, acks cursor
-  │
-  ├── PolicySyncLoop
-  │     └── SSE "policy_changed" → pull delta → apply to config + store
-  │
-  ├── RbacSyncLoop
-  │     └── SSE "rbac_changed" → pull snapshot → apply to local store
-  │
-  ├── SseClient (auto-reconnect with exponential backoff)
-  │     └── Receives: policy_changed, rbac_changed, force_resync, revoked
-  │
-  └── ControlPlaneHttpClient (REST with timeout)
-        ├── register / heartbeat / deregister
-        ├── pullPolicies / pullRbac
-        └── pushAuditBatch / pushMutations / ack
+
+### TLS Enforcement
+
+The `ControlPlaneHttpClient` enforces HTTPS for all non-localhost control plane connections when `requireTls` is `true` (the default in `NODE_ENV=production`). If the configured `endpoint` uses `http://` for a non-localhost host, the client throws at startup:
+
 ```
+[safefence] Control plane URL "http://example.com" requires HTTPS for
+non-localhost connections. Set requireTls: false to override.
+```
+
+To allow plain HTTP in development or behind a TLS-terminating proxy on localhost:
+
+```typescript
+controlPlane: {
+  enabled: true,
+  endpoint: "http://localhost:3100",
+  orgApiKey: "sf_...",
+  requireTls: false   // explicit override; defaults to true in production
+}
+```
+
+This check happens before any network connection is made — it is a startup-time configuration guard, not a runtime intercept.
 
 ### Data Flow: Policy Sync
 

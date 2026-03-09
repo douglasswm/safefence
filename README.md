@@ -10,30 +10,36 @@ Deterministic security guardrails for OpenClaw AI agents. A 12-detector pipeline
 
 ## Architecture
 
+```mermaid
+graph TB
+    subgraph Cloud ["SafeFence Cloud (optional)"]
+        CP["control-plane<br/>Hono REST API<br/>:3100"]
+        PG[("PostgreSQL 16")]
+        RD[("Redis 7")]
+        DASH["dashboard<br/>Next.js UI<br/>:3200"]
+        CP --- PG
+        CP --- RD
+        DASH -->|"proxy → X-API-Key"| CP
+    end
+
+    subgraph Instance1 ["OpenClaw Instance"]
+        GE1["@safefence/openclaw-guardrails<br/>─────────────────────────<br/>GuardrailsEngine · 12 detectors<br/>Dual-auth RBAC · Policy store<br/>Audit trail · Approvals"]
+    end
+
+    subgraph Instance2 ["OpenClaw Instance"]
+        GE2["@safefence/openclaw-guardrails"]
+    end
+
+    CP -->|"SSE: policy_changed<br/>rbac_changed"| Instance1
+    Instance1 -->|"REST: audit batch<br/>heartbeat · ack"| CP
+    CP -->|"SSE + REST"| Instance2
+    Instance2 -->|"REST"| CP
 ```
-                      ┌─────────────────────────────────┐
-                      │   SafeFence Cloud (optional)     │
-                      │                                  │
-                      │   control-plane   ◄──► Postgres  │
-                      │   (Hono REST API)  ◄──► Redis    │
-                      │                                  │
-                      │   dashboard        [scaffold]    │
-                      │   (Next.js UI)                   │
-                      └──────────┬──────────▲────────────┘
-                                 │          │
-                      Policy/RBAC sync   Audit upload
-                       (SSE + REST)     (REST batch)
-                                 │          │
-┌────────────────────────────────▼──────────┴────────────────────────┐
-│   OpenClaw Instance                                                │
-│                                                                    │
-│   @safefence/openclaw-guardrails                                   │
-│   ┌──────────────────────────────────────────────────────────┐     │
-│   │ GuardrailsEngine → 12 detectors (all local, all fast)    │     │
-│   │ Dual-auth RBAC · Policy store · Audit trail · Approvals  │     │
-│   └──────────────────────────────────────────────────────────┘     │
-└────────────────────────────────────────────────────────────────────┘
-```
+
+**Two deployment modes:**
+
+- **Standalone** -- Install the plugin, configure policies in code, done. Zero infrastructure. This is the default.
+- **Cloud** -- Add a control plane server to centrally manage policies, RBAC, and audit across multiple OpenClaw instances. Detectors still run locally; the control plane is never in the hot path.
 
 **Two deployment modes:**
 
@@ -46,10 +52,10 @@ This is a pnpm workspace. All packages are managed from the repository root.
 
 | Package | Description | Status | Docs |
 |---------|-------------|--------|------|
-| [`@safefence/types`](./packages/types/) | Shared protocol-boundary types | **Stable** | [Source](./packages/types/) |
+| [`@safefence/types`](./packages/types/) | Shared protocol-boundary types | **Stable** | [README](./packages/types/README.md) |
 | [`@safefence/openclaw-guardrails`](./packages/openclaw-guardrails/) | Core guardrails plugin for OpenClaw | **Production-ready** -- 186 tests, ~85% coverage | [README](./packages/openclaw-guardrails/README.md) · [Architecture](./packages/openclaw-guardrails/docs/ARCHITECTURE.md) · [Config](./packages/openclaw-guardrails/docs/CONFIG.md) |
-| [`@safefence/control-plane`](./packages/control-plane/) | Centralized REST API (Hono + PostgreSQL + Redis) | **Functional** -- no tests yet | [Source](./packages/control-plane/) |
-| `@safefence/dashboard` | Next.js admin UI | **Scaffold** -- static pages, no API integration | [Source](./packages/dashboard/) |
+| [`@safefence/control-plane`](./packages/control-plane/) | Centralized REST API (Hono + PostgreSQL + Redis) | **Functional** -- builds clean, no tests yet | [README](./packages/control-plane/README.md) |
+| [`@safefence/dashboard`](./packages/dashboard/) | Next.js admin UI | **Scaffold** -- working proxy and API integration | [README](./packages/dashboard/README.md) |
 
 ## Quick Start: Standalone
 
@@ -102,6 +108,25 @@ For the full step-by-step guide, environment variable reference, and current lim
 | [Deployment Guide](./docs/DEPLOYMENT.md) | Standalone & cloud setup, env vars, limitations |
 | [LLM Security Research](./docs/openclaw-llm-security-research.md) | OWASP mapping, threat model, hardening guidance |
 | [RBAC Research](./docs/rbac-research.md) | RBAC and adaptive guardrails strategic framework |
+
+## Security
+
+The security hardening across the control plane and dashboard includes:
+
+| Feature | Where |
+|---------|-------|
+| Input validation (Zod schemas on all endpoints) | control-plane management + sync API |
+| Rate limiting (3 tiers: 10/100/600 req/min, Redis sliding window) | control-plane |
+| Security headers (HSTS, X-Frame-Options, nosniff, Referrer-Policy) | control-plane + dashboard |
+| O(1) API key lookup via prefix column + bcrypt verify | control-plane |
+| Bootstrap secret gate for org creation | control-plane |
+| Non-root Docker container | control-plane |
+| Redis authentication | control-plane |
+| TLS enforcement for non-localhost control plane connections | guardrails agent |
+| Path traversal prevention in dashboard proxy | dashboard |
+| CSP headers | dashboard |
+
+See [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md) for the full security reference.
 
 ## Compatibility
 
