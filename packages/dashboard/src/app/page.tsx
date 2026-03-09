@@ -1,14 +1,29 @@
+"use client";
+
+import { useApiClient } from "../lib/auth-context";
+import { useFetch } from "../lib/use-fetch";
+import { ErrorBanner } from "../components/ui";
+
 export default function OverviewPage() {
+  const api = useApiClient();
+  const instances = useFetch(() => api.listInstances());
+  const stats = useFetch(() => api.getAuditStats());
+
+  const cards = [
+    { label: "Connected Instances", value: instances.data?.filter((i) => i.status === "active").length ?? "—" },
+    { label: "Total Evaluations", value: stats.data?.total ?? "—" },
+    { label: "Denied Requests", value: stats.data?.denied ?? "—" },
+    { label: "Allowed Requests", value: stats.data?.allowed ?? "—" },
+  ];
+
+  const error = instances.error || stats.error;
+
   return (
     <div>
       <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 24 }}>Organization Overview</h1>
+      <ErrorBanner message={error} />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 32 }}>
-        {[
-          { label: "Connected Instances", value: "—" },
-          { label: "Total Evaluations (24h)", value: "—" },
-          { label: "Denied Requests (24h)", value: "—" },
-          { label: "Avg Latency", value: "—" },
-        ].map((stat) => (
+        {cards.map((stat) => (
           <div
             key={stat.label}
             style={{
@@ -23,9 +38,7 @@ export default function OverviewPage() {
           </div>
         ))}
       </div>
-      <p style={{ color: "#666", fontSize: 14 }}>
-        Connect your SafeFence dashboard to the control plane API to see live data.
-      </p>
+      {instances.loading && <p style={{ color: "#666", fontSize: 14 }}>Loading...</p>}
     </div>
   );
 }
