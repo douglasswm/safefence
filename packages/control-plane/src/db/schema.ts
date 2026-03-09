@@ -23,7 +23,7 @@ import { relations } from "drizzle-orm";
 // Shared constants
 // ═══════════════════════════════════════════
 
-export type InstanceStatus = "registered" | "active" | "deregistered" | "stale";
+export type InstanceStatus = "registered" | "active" | "connected" | "disconnected" | "deregistered" | "stale";
 export type PolicyScope = "org" | "group" | "instance";
 export type AuditDecision = "allow" | "deny";
 export type PlanTier = "free" | "pro" | "enterprise";
@@ -34,6 +34,8 @@ export type BotAccessPolicy = "owner_only" | "team" | "public";
 export const INSTANCE_STATUS = {
   REGISTERED: "registered" as const,
   ACTIVE: "active" as const,
+  CONNECTED: "connected" as const,
+  DISCONNECTED: "disconnected" as const,
   DEREGISTERED: "deregistered" as const,
   STALE: "stale" as const,
 };
@@ -89,7 +91,7 @@ export const instances = pgTable("instances", {
   groupId: text("group_id").references(() => instanceGroups.id, { onDelete: "set null" }),
   pluginVersion: text("plugin_version"),
   tags: jsonb("tags").$type<string[]>().default([]),
-  status: text("status").notNull().default("registered"),
+  status: text("status").notNull().default(INSTANCE_STATUS.REGISTERED),
   policyVersion: integer("policy_version").notNull().default(0),
   rbacVersion: integer("rbac_version").notNull().default(0),
   auditCursor: bigint("audit_cursor", { mode: "number" }).notNull().default(0),
@@ -111,7 +113,7 @@ export const policyCurrent = pgTable("policy_current", {
   orgId: text("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   key: text("key").notNull(),
   value: jsonb("value").notNull(),
-  scope: text("scope").notNull().default("org"), // org | group | instance
+  scope: text("scope").notNull().default(POLICY_SCOPE.ORG),
   scopeId: text("scope_id"), // group or instance ID for scoped overrides
   version: integer("version").notNull().default(1),
   updatedBy: text("updated_by"),

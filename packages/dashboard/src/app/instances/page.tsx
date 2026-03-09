@@ -3,12 +3,16 @@
 import { useApiClient } from "../../lib/auth-context";
 import { useFetch } from "../../lib/use-fetch";
 import { ErrorBanner, StatusBadge, TableHeader, TableEmptyRow } from "../../components/ui";
+import { INSTANCE_STATUS } from "../../lib/types";
+import type { InstanceStatus } from "../../lib/types";
 
-const statusColors: Record<string, string> = {
-  active: "#22c55e",
-  registered: "#3b82f6",
-  deregistered: "#ef4444",
-  stale: "#eab308",
+const statusColors: Record<InstanceStatus, string> = {
+  [INSTANCE_STATUS.ACTIVE]: "#22c55e",
+  [INSTANCE_STATUS.CONNECTED]: "#22c55e",
+  [INSTANCE_STATUS.REGISTERED]: "#3b82f6",
+  [INSTANCE_STATUS.DEREGISTERED]: "#ef4444",
+  [INSTANCE_STATUS.DISCONNECTED]: "#888",
+  [INSTANCE_STATUS.STALE]: "#eab308",
 };
 
 export default function InstancesPage() {

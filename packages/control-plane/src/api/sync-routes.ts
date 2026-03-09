@@ -19,6 +19,7 @@ import {
   cloudBots,
   rbacMutations,
   auditEvents,
+  INSTANCE_STATUS,
 } from "../db/schema.js";
 import { createInstanceToken } from "../auth/jwt.js";
 import { resolveOrgByApiKey } from "../auth/api-key.js";
@@ -52,7 +53,7 @@ export function createSyncRoutes(db: Database, broadcaster: SseBroadcaster): Hon
         groupId: groupId ?? null,
         pluginVersion,
         tags: tags ?? [],
-        status: "connected",
+        status: INSTANCE_STATUS.CONNECTED,
         registeredAt: new Date(),
         lastHeartbeatAt: new Date(),
       });
@@ -95,7 +96,7 @@ export function createSyncRoutes(db: Database, broadcaster: SseBroadcaster): Hon
         rbacVersion,
         auditCursor: auditCursor ?? 0,
         lastMetrics: metrics ?? null,
-        status: "connected",
+        status: INSTANCE_STATUS.CONNECTED,
       })
       .where(eq(instances.id, instanceId));
 
@@ -116,7 +117,7 @@ export function createSyncRoutes(db: Database, broadcaster: SseBroadcaster): Hon
   authed.post("/deregister", async (c) => {
     const body = await c.req.json();
     await db.update(instances)
-      .set({ status: "disconnected" })
+      .set({ status: INSTANCE_STATUS.DISCONNECTED })
       .where(eq(instances.id, body.instanceId));
     return c.json({ ok: true });
   });

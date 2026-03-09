@@ -3,13 +3,15 @@
  * Derived from Drizzle schema at control-plane/src/db/schema.ts.
  */
 
-export type InstanceStatus = "registered" | "active" | "deregistered" | "stale";
+export type InstanceStatus = "registered" | "active" | "connected" | "disconnected" | "deregistered" | "stale";
 export type PolicyScope = "org" | "group" | "instance";
 export type AuditDecision = "allow" | "deny";
 
 export const INSTANCE_STATUS = {
   REGISTERED: "registered" as const,
   ACTIVE: "active" as const,
+  CONNECTED: "connected" as const,
+  DISCONNECTED: "disconnected" as const,
   DEREGISTERED: "deregistered" as const,
   STALE: "stale" as const,
 };

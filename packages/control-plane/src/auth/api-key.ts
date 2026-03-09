@@ -27,7 +27,7 @@ export async function verifyApiKey(key: string, hash: string): Promise<boolean> 
 /**
  * Resolve an org ID from an API key.
  * Uses api_key_prefix for O(1) lookup when available,
- * falls back to parallel scan for legacy orgs without prefix.
+ * falls back to sequential scan for legacy orgs without prefix.
  */
 export async function resolveOrgByApiKey(db: Database, key: string): Promise<string | null> {
   const prefix = key.slice(0, 8);
@@ -41,13 +41,12 @@ export async function resolveOrgByApiKey(db: Database, key: string): Promise<str
   const prefixMatch = prefixResults.find(Boolean);
   if (prefixMatch) return prefixMatch;
 
-  // Slow path: parallel scan of legacy orgs without prefix
+  // Slow path: sequential scan with short-circuit (bcrypt is CPU-bound,
+  // parallel would saturate the libuv thread pool without early exit)
   const legacy = await db.select().from(organizations)
     .where(isNull(organizations.apiKeyPrefix));
-  if (legacy.length === 0) return null;
-
-  const legacyResults = await Promise.all(
-    legacy.map(async (org) => (await verifyApiKey(key, org.apiKeyHash)) ? org.id : null),
-  );
-  return legacyResults.find(Boolean) ?? null;
+  for (const org of legacy) {
+    if (await verifyApiKey(key, org.apiKeyHash)) return org.id;
+  }
+  return null;
 }
