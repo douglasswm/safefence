@@ -235,9 +235,9 @@ const server = createAdminServer({
 ## Development
 
 ```bash
-cd packages/openclaw-guardrails
-npm install
-npm test
-npm run test:coverage
-npm run build
+# From the repo root (pnpm workspace)
+pnpm install
+pnpm --filter @safefence/openclaw-guardrails test
+pnpm --filter @safefence/openclaw-guardrails test:coverage
+pnpm --filter @safefence/openclaw-guardrails build
 ```

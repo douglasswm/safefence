@@ -42,8 +42,11 @@ Deterministic security guardrails for OpenClaw AI agents. A 12-detector pipeline
 
 ## Packages
 
+This is a pnpm workspace. All packages are managed from the repository root.
+
 | Package | Description | Status | Docs |
 |---------|-------------|--------|------|
+| [`@safefence/types`](./packages/types/) | Shared protocol-boundary types | **Stable** | [Source](./packages/types/) |
 | [`@safefence/openclaw-guardrails`](./packages/openclaw-guardrails/) | Core guardrails plugin for OpenClaw | **Production-ready** -- 186 tests, ~85% coverage | [README](./packages/openclaw-guardrails/README.md) · [Architecture](./packages/openclaw-guardrails/docs/ARCHITECTURE.md) · [Config](./packages/openclaw-guardrails/docs/CONFIG.md) |
 | [`@safefence/control-plane`](./packages/control-plane/) | Centralized REST API (Hono + PostgreSQL + Redis) | **Functional** -- no tests yet | [Source](./packages/control-plane/) |
 | `@safefence/dashboard` | Next.js admin UI | **Scaffold** -- static pages, no API integration | [Source](./packages/dashboard/) |
@@ -51,10 +54,9 @@ Deterministic security guardrails for OpenClaw AI agents. A 12-detector pipeline
 ## Quick Start: Standalone
 
 ```bash
-cd packages/openclaw-guardrails
-npm install
-npm test        # 186 tests
-npm run build   # produces dist/
+pnpm install          # from repo root — installs all workspace packages
+pnpm --filter @safefence/openclaw-guardrails test    # 186 tests
+pnpm --filter @safefence/openclaw-guardrails build   # produces dist/
 ```
 
 Configure in your `openclaw.config.ts` and you're running. See the [plugin README](./packages/openclaw-guardrails/README.md) for full configuration.
@@ -83,8 +85,7 @@ curl -s -X POST http://localhost:3100/api/v1/orgs \
 #      }
 
 # 5. Start the dashboard (scaffold -- read-only placeholder UI)
-cd ../dashboard
-npm install && npm run dev
+pnpm --filter @safefence/dashboard dev
 # → http://localhost:3200
 ```
 
@@ -115,11 +116,11 @@ Releases are published automatically via GitHub Actions with [npm provenance](ht
 ```bash
 # 1. Bump version from the package directory
 cd packages/openclaw-guardrails
-npm version patch   # or: minor | major
+pnpm version patch   # or: minor | major
 
-# 2. npm version updates package.json and package-lock.json, but the
-#    version sync script also modifies openclaw.plugin.json, version.ts,
-#    and the root README.md. These changes are staged but NOT committed
+# 2. pnpm version updates package.json, but the version sync script
+#    also modifies openclaw.plugin.json, version.ts, and the root
+#    README.md. These changes are staged but NOT committed
 #    automatically -- commit them yourself:
 cd ../..
 git add -A
@@ -133,4 +134,4 @@ git push origin master --tags
 npm audit signatures
 ```
 
-`npm version` must be run from `packages/openclaw-guardrails/` because it operates on that directory's `package.json`. It runs tests and builds via `preversion`, then syncs the version to `openclaw.plugin.json`, `src/plugin/version.ts`, and the root `README.md` via `scripts/sync-version.sh`. However, because this is a monorepo subdirectory, npm's auto-commit does not reliably capture all synced files -- you must commit and tag manually.
+`pnpm version` must be run from `packages/openclaw-guardrails/` because it operates on that directory's `package.json`. It runs tests and builds via `preversion`, then syncs the version to `openclaw.plugin.json`, `src/plugin/version.ts`, and the root `README.md` via `scripts/sync-version.sh`. However, because this is a monorepo subdirectory, pnpm's auto-commit does not reliably capture all synced files -- you must commit and tag manually.

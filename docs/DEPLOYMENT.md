@@ -11,9 +11,8 @@ The default mode. No infrastructure required -- the plugin runs entirely within 
 ### Setup
 
 ```bash
-cd packages/openclaw-guardrails
-npm install
-npm run build
+pnpm install                                          # from repo root
+pnpm --filter @safefence/openclaw-guardrails build    # produces dist/
 ```
 
 Configure the plugin in your `openclaw.config.ts` -- see the [Config Reference](../packages/openclaw-guardrails/docs/CONFIG.md) for all options.
@@ -170,9 +169,7 @@ The dashboard is a Next.js application that provides a UI shell with five pages:
 To run it:
 
 ```bash
-cd packages/dashboard
-npm install
-npm run dev
+pnpm --filter @safefence/dashboard dev
 # → http://localhost:3200
 ```
 
@@ -202,7 +199,6 @@ There are currently no `.env.example` files in the repository.
 - **JWT tokens expire in 24h with no refresh** -- instance tokens are issued on registration with a hardcoded 24-hour expiry (`HS256`). There is no token refresh mechanism; instances must re-register after expiry.
 - **API key lookup is O(n) bcrypt** -- org API key verification iterates all keys and runs bcrypt comparison on each. This is fine for small deployments but does not scale. A prefix-based lookup column is planned.
 - **RBAC delta sync falls back to full snapshot** -- the sync protocol supports delta pulls, but the current implementation always sends the full RBAC state.
-- **No shared types package** -- TypeScript types are duplicated between `openclaw-guardrails` and `control-plane`. Changes to sync protocol types must be updated in both packages manually.
 - **No `.env.example` files** -- environment variable documentation exists only in this guide and in `docker-compose.yml`.
 
 ---

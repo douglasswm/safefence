@@ -58,7 +58,7 @@
 
 4. **New classes exported**: `SqliteRoleStore`, `ConfigRoleStore`, `AuditStore`.
 
-5. **New peer dependency**: `better-sqlite3` (optional). Only required when `rbacStore.enabled: true`. Install with `npm install better-sqlite3`.
+5. **New peer dependency**: `better-sqlite3` (optional). Only required when `rbacStore.enabled: true`. Install with `pnpm add better-sqlite3`.
 
 6. **Bot commands**: When RBAC store is enabled, the plugin registers `/sf` commands for role management, bot configuration, and audit queries. These commands require appropriate permissions (e.g., `admin:role_manage`).
 
