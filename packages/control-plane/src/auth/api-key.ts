@@ -41,8 +41,15 @@ export async function resolveOrgByApiKey(db: Database, key: string): Promise<str
 
   // Slow path: sequential scan with short-circuit (bcrypt is CPU-bound,
   // parallel would saturate the libuv thread pool without early exit)
+  const MAX_LEGACY_SCAN = 50;
   const legacy = await db.select().from(organizations)
-    .where(isNull(organizations.apiKeyPrefix));
+    .where(isNull(organizations.apiKeyPrefix))
+    .limit(MAX_LEGACY_SCAN);
+
+  if (legacy.length === MAX_LEGACY_SCAN) {
+    console.warn("[safefence] Legacy API key scan capped at 50 orgs. Migrate keys to include prefix for O(1) lookup.");
+  }
+
   for (const org of legacy) {
     if (await verifyApiKey(key, org.apiKeyHash)) return org.id;
   }

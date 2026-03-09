@@ -58,6 +58,47 @@ export const ackSchema = z.object({
   rbacVersion: z.number().int().optional(),
 });
 
+// ── Management API schemas ──
+
+export const createOrgSchema = z.object({
+  name: z.string().min(1).max(255).optional(),
+  planTier: z.enum(["free", "pro", "enterprise"]).optional(),
+});
+
+export const createGroupSchema = z.object({
+  name: z.string().min(1).max(255),
+  description: z.string().max(1000).optional(),
+});
+
+export const upsertPolicySchema = z.object({
+  value: z.unknown(),
+  scope: z.string().optional(),
+  updatedBy: z.string().max(255).optional(),
+});
+
+export const createRoleSchema = z.object({
+  name: z.string().min(1).max(255),
+  description: z.string().max(1000).optional(),
+  projectId: z.string().max(255).optional(),
+  createdBy: z.string().max(255).optional(),
+});
+
+export const createUserSchema = z.object({
+  id: z.string().uuid().optional(),
+  displayName: z.string().min(1).max(255),
+  platform: z.string().max(255).optional(),
+  platformId: z.string().max(255).optional(),
+});
+
+export const createAssignmentSchema = z.object({
+  roleId: z.string().uuid(),
+  scopeType: z.enum(["project", "im_channel"]).optional(),
+  scopeId: z.string().max(255).optional(),
+  botInstanceId: z.string().optional(),
+  grantedBy: z.string().max(255).optional(),
+  expiresAt: z.string().datetime().optional(),
+});
+
 type ParseSuccess<T> = { success: true; data: T };
 type ParseFailure = { success: false; response: Response };
 

@@ -22,6 +22,8 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+// sessionStorage (not sessionStorage) so credentials clear when tab closes,
+// reducing exposure if page is XSS-compromised.
 const STORAGE_KEY = "safefence_auth";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -31,7 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
+      const stored = sessionStorage.getItem(STORAGE_KEY);
       if (stored) {
         const { orgId: o, apiKey: k } = JSON.parse(stored);
         if (o && k) {
@@ -48,13 +50,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback((o: string, k: string) => {
     setOrgId(o);
     setApiKey(k);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ orgId: o, apiKey: k }));
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ orgId: o, apiKey: k }));
   }, []);
 
   const logout = useCallback(() => {
     setOrgId("");
     setApiKey("");
-    localStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(STORAGE_KEY);
   }, []);
 
   const isAuthenticated = !!(orgId && apiKey);
@@ -64,7 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [orgId, apiKey, isAuthenticated, login, logout],
   );
 
-  // Don't render until we've checked localStorage to avoid hydration mismatch
+  // Don't render until we've checked sessionStorage to avoid hydration mismatch
   if (!loaded) return null;
 
   if (!isAuthenticated) {

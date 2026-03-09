@@ -8,6 +8,9 @@ importers:
 
   packages/control-plane:
     dependencies:
+      '@hono/node-server':
+        specifier: ^1.19.9
+        version: 1.19.9(hono@4.12.5)
       '@safefence/types':
         specifier: workspace:*
         version: link:../types
@@ -5064,7 +5067,6 @@ snapshots:
   '@hono/node-server@1.19.9(hono@4.12.5)':
     dependencies:
       hono: 4.12.5
-    optional: true
 
   '@huggingface/jinja@0.5.5': {}
 

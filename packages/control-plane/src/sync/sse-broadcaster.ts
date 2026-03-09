@@ -5,7 +5,7 @@
 
 import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
-import type Redis from "ioredis";
+import type { Redis } from "ioredis";
 
 export interface SyncEventMessage {
   type: "policy_changed" | "rbac_changed" | "force_resync" | "revoked";

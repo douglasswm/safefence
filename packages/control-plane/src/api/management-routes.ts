@@ -29,6 +29,15 @@ import {
 import { generateApiKey, hashApiKey } from "../auth/api-key.js";
 import { apiKeyAuth } from "../auth/middleware.js";
 import type { SseBroadcaster } from "../sync/sse-broadcaster.js";
+import {
+  parseBody,
+  createOrgSchema,
+  createGroupSchema,
+  upsertPolicySchema,
+  createRoleSchema,
+  createUserSchema,
+  createAssignmentSchema,
+} from "./schemas.js";
 
 export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster): Hono {
   const app = new Hono();
@@ -45,7 +54,10 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
       }
     }
 
-    const body = await c.req.json();
+    const parsed = await parseBody(c, createOrgSchema);
+    if (!parsed.success) return parsed.response;
+    const body = parsed.data;
+
     const id = randomUUID();
     const apiKey = generateApiKey();
     const apiKeyHash = await hashApiKey(apiKey);
@@ -94,7 +106,9 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
   // ── Instance Groups ──
   authed.post("/orgs/:orgId/groups", async (c) => {
     const orgId = c.get("orgId");
-    const body = await c.req.json();
+    const parsed = await parseBody(c, createGroupSchema);
+    if (!parsed.success) return parsed.response;
+    const body = parsed.data;
     const id = randomUUID();
     await db.insert(instanceGroups).values({
       id,
@@ -131,7 +145,9 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
   authed.put("/orgs/:orgId/policies/:key", async (c) => {
     const orgId = c.get("orgId");
     const key = c.req.param("key");
-    const body = await c.req.json();
+    const parsed = await parseBody(c, upsertPolicySchema);
+    if (!parsed.success) return parsed.response;
+    const body = parsed.data;
 
     const result = await db.transaction(async (tx) => {
       const newVersion = await bumpPolicyVersion(tx, orgId);
@@ -181,7 +197,9 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
   // ── RBAC: Roles ──
   authed.post("/orgs/:orgId/roles", async (c) => {
     const orgId = c.get("orgId");
-    const body = await c.req.json();
+    const parsed = await parseBody(c, createRoleSchema);
+    if (!parsed.success) return parsed.response;
+    const body = parsed.data;
     const id = randomUUID();
 
     await db.insert(cloudRoles).values({
@@ -215,7 +233,9 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
   // ── RBAC: Users ──
   authed.post("/orgs/:orgId/users", async (c) => {
     const orgId = c.get("orgId");
-    const body = await c.req.json();
+    const parsed = await parseBody(c, createUserSchema);
+    if (!parsed.success) return parsed.response;
+    const body = parsed.data;
     const id = body.id ?? randomUUID();
     await db.insert(cloudUsers).values({ id, orgId, displayName: body.displayName });
 
@@ -241,7 +261,9 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
   authed.post("/orgs/:orgId/users/:userId/roles", async (c) => {
     const orgId = c.get("orgId");
     const userId = c.req.param("userId");
-    const body = await c.req.json();
+    const parsed = await parseBody(c, createAssignmentSchema);
+    if (!parsed.success) return parsed.response;
+    const body = parsed.data;
     const id = randomUUID();
 
     await db.insert(cloudRoleAssignments).values({

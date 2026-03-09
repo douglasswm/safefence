@@ -14,6 +14,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD:-safefence-dev}
     ports:
       - "6379:6379"
 
@@ -23,7 +24,7 @@ services:
       - "3100:3100"
     environment:
       DATABASE_URL: postgresql://safefence:safefence@postgres:5432/safefence
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${REDIS_PASSWORD:-safefence-dev}@redis:6379
       JWT_SECRET: change-me-in-production
       PORT: "3100"
     depends_on:

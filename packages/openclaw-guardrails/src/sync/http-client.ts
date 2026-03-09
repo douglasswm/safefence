@@ -34,6 +34,8 @@ export interface HttpClientOptions {
   token?: string;
   /** Request timeout in ms (default: 10000) */
   timeoutMs?: number;
+  /** Require HTTPS for non-localhost URLs (default: true in production) */
+  requireTls?: boolean;
 }
 
 export class ControlPlaneHttpClient {
@@ -46,14 +48,21 @@ export class ControlPlaneHttpClient {
     this.token = opts.token;
     this.timeoutMs = opts.timeoutMs ?? 10_000;
 
-    // M5: TLS warning for non-localhost
+    // TLS enforcement for non-localhost URLs
+    const requireTls = opts.requireTls ?? (process.env.NODE_ENV === "production");
     try {
       const parsed = new URL(this.baseUrl);
-      if (parsed.protocol !== "https:" && parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
-        console.warn(`[safefence] WARNING: Control plane URL "${this.baseUrl}" is not using TLS. Use HTTPS for non-localhost connections.`);
+      const isLocal = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+      if (parsed.protocol !== "https:" && !isLocal) {
+        if (requireTls) {
+          throw new Error(
+            `[safefence] Control plane URL "${this.baseUrl}" requires HTTPS for non-localhost connections. Set requireTls: false to override.`
+          );
+        }
+        console.warn(`[safefence] WARNING: Control plane URL "${this.baseUrl}" is not using TLS.`);
       }
-    } catch {
-      // Invalid URL will fail on first request
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith("[safefence]")) throw e;
     }
   }
 

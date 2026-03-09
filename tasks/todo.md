@@ -92,3 +92,27 @@
 ### Verification
 - [x] `npx tsc --noEmit` — zero type errors on guardrails package
 - [x] `npx vitest run` — 186 tests pass across 22 files (no regressions)
+
+---
+
+## Milestone 11: Security Hardening (9 findings)
+
+### Implementation
+- [x] **M1**: .gitignore .env files
+- [x] **H1**: Management API input validation (6 Zod schemas + parseBody)
+- [x] **H3**: Cap legacy API key scan to 50 rows
+- [x] **M2**: Security headers middleware (control-plane + Next.js)
+- [x] **H2**: Redis sorted-set rate limiter (strict/moderate/relaxed tiers)
+- [x] **M3**: Dashboard auth → sessionStorage
+- [x] **M4**: Non-root Docker container (USER app)
+- [x] **M5**: Redis authentication in docker-compose
+- [x] **M6**: TLS enforcement option in http-client
+
+### Verification
+- [x] `pnpm --filter @safefence/types build` — compiles
+- [x] `pnpm --filter @safefence/openclaw-guardrails build` — compiles
+- [x] `pnpm --filter @safefence/control-plane build` — fixed ioredis imports + added @hono/node-server dep; builds clean
+- [x] `pnpm --filter @safefence/dashboard build` — compiles, all pages generated
+- [x] `pnpm --filter @safefence/openclaw-guardrails test` — 186 tests pass (22 files)
+- [x] control-plane has no test files (server package, no vitest specs)
+- [x] `git check-ignore .env` → `.env` (verified), `.env.example` NOT ignored

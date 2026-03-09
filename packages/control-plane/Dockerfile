@@ -7,9 +7,11 @@ COPY src/ src/
 RUN npx tsc
 
 FROM node:22-alpine
+RUN addgroup -S app && adduser -S app -G app
 WORKDIR /app
-COPY --from=builder /app/dist dist/
-COPY --from=builder /app/node_modules node_modules/
-COPY package.json ./
+COPY --from=builder --chown=app:app /app/dist dist/
+COPY --from=builder --chown=app:app /app/node_modules node_modules/
+COPY --chown=app:app package.json ./
+USER app
 EXPOSE 3100
 CMD ["node", "dist/index.js"]

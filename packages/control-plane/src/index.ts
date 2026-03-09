@@ -7,12 +7,14 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { serve } from "@hono/node-server";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { createDb } from "./db/connection.js";
 import { initJwtSecret } from "./auth/jwt.js";
 import { createSyncRoutes } from "./api/sync-routes.js";
 import { createManagementRoutes } from "./api/management-routes.js";
 import { SseBroadcaster } from "./sync/sse-broadcaster.js";
+import { securityHeaders } from "./middleware/security-headers.js";
+import { rateLimiter } from "./middleware/rate-limit.js";
 
 const PORT = parseInt(process.env.PORT ?? "3100", 10);
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -37,6 +39,12 @@ app.use("/*", cors({
   origin: process.env.CORS_ORIGIN ?? "http://localhost:3200",
 }));
 app.use("/*", logger());
+app.use("/*", securityHeaders());
+
+// Rate limiting — more specific paths first
+app.use("/api/v1/sync/*", rateLimiter(redis, { windowMs: 60_000, max: 600, keyPrefix: "rl:sync" }));
+app.use("/api/v1/orgs", rateLimiter(redis, { windowMs: 60_000, max: 10, keyPrefix: "rl:pub" }));
+app.use("/api/v1/*", rateLimiter(redis, { windowMs: 60_000, max: 100, keyPrefix: "rl:mgmt" }));
 
 // Health check
 app.get("/health", (c) => c.json({ status: "ok", version: "0.1.0" }));
