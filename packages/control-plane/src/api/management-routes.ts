@@ -42,6 +42,7 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
       id,
       name: body.name ?? "New Organization",
       apiKeyHash,
+      apiKeyPrefix: apiKey.slice(0, 8),
       planTier: body.planTier ?? "free",
     });
 
@@ -99,6 +100,16 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
     return c.json(policies);
   });
 
+  // Must be registered before parametric :key routes to avoid shadowing
+  authed.get("/orgs/:orgId/policies/versions", async (c) => {
+    const orgId = c.get("orgId");
+    const history = await db.select().from(policyVersions)
+      .where(eq(policyVersions.orgId, orgId))
+      .orderBy(desc(policyVersions.version))
+      .limit(100);
+    return c.json(history);
+  });
+
   authed.put("/orgs/:orgId/policies/:key", async (c) => {
     const orgId = c.get("orgId");
     const key = c.req.param("key");
@@ -150,15 +161,6 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
     const newVersion = await bumpPolicyVersion(db, orgId);
     await broadcaster.publish(orgId, { type: "policy_changed", key, version: newVersion });
     return c.json({ key, deleted: true, version: newVersion });
-  });
-
-  authed.get("/orgs/:orgId/policies/versions", async (c) => {
-    const orgId = c.get("orgId");
-    const history = await db.select().from(policyVersions)
-      .where(eq(policyVersions.orgId, orgId))
-      .orderBy(desc(policyVersions.version))
-      .limit(100);
-    return c.json(history);
   });
 
   // ── RBAC: Roles ──

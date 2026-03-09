@@ -4,6 +4,7 @@
 
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcrypt";
+import { eq, isNull } from "drizzle-orm";
 import type { Database } from "../db/connection.js";
 import { organizations } from "../db/schema.js";
 
@@ -24,13 +25,26 @@ export async function verifyApiKey(key: string, hash: string): Promise<boolean> 
 }
 
 /**
- * Resolve an org ID from an API key by scanning all orgs.
- * TODO: Add api_key_prefix column for O(1) lookup instead of O(n) bcrypt.
+ * Resolve an org ID from an API key.
+ * Uses api_key_prefix for O(1) lookup when available,
+ * falls back to O(n) scan for legacy orgs without prefix.
  */
 export async function resolveOrgByApiKey(db: Database, key: string): Promise<string | null> {
-  const orgs = await db.select().from(organizations);
-  for (const org of orgs) {
+  const prefix = key.slice(0, 8);
+
+  // Fast path: lookup by prefix
+  const byPrefix = await db.select().from(organizations)
+    .where(eq(organizations.apiKeyPrefix, prefix));
+  for (const org of byPrefix) {
     if (await verifyApiKey(key, org.apiKeyHash)) return org.id;
   }
+
+  // Slow path: scan orgs without prefix (backward compat for pre-migration orgs)
+  const legacy = await db.select().from(organizations)
+    .where(isNull(organizations.apiKeyPrefix));
+  for (const org of legacy) {
+    if (await verifyApiKey(key, org.apiKeyHash)) return org.id;
+  }
+
   return null;
 }

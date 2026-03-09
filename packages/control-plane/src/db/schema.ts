@@ -27,6 +27,7 @@ export const organizations = pgTable("organizations", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   apiKeyHash: text("api_key_hash").notNull(),
+  apiKeyPrefix: text("api_key_prefix"),
   planTier: text("plan_tier").notNull().default("free"),
   maxInstances: integer("max_instances").notNull().default(5),
   maxAuditRetentionDays: integer("max_audit_retention_days").notNull().default(90),

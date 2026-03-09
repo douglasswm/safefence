@@ -29,7 +29,9 @@ const broadcaster = new SseBroadcaster(redis, subRedis);
 
 // Build app
 const app = new Hono();
-app.use("/*", cors());
+app.use("/*", cors({
+  origin: process.env.CORS_ORIGIN ?? "http://localhost:3200",
+}));
 app.use("/*", logger());
 
 // Health check
