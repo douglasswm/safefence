@@ -12,14 +12,24 @@ async function proxyRequest(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
+  // Auth gate: reject unauthenticated requests
+  const auth = request.headers.get("Authorization");
+  if (!auth) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { path } = await params;
-  const upstream = `${CONTROL_PLANE_URL}/api/v1/${path.join("/")}${request.nextUrl.search}`;
+  // Sanitize path: filter traversal segments and encode each segment
+  const safePath = path
+    .filter((seg) => seg !== ".." && seg !== ".")
+    .map((seg) => encodeURIComponent(seg))
+    .join("/");
+  const upstream = `${CONTROL_PLANE_URL}/api/v1/${safePath}${request.nextUrl.search}`;
 
   const headers: Record<string, string> = {};
   const contentType = request.headers.get("Content-Type");
   if (contentType) headers["Content-Type"] = contentType;
-  const auth = request.headers.get("Authorization");
-  if (auth) headers["Authorization"] = auth;
+  headers["Authorization"] = auth;
 
   const init: RequestInit = {
     method: request.method,
@@ -45,7 +55,7 @@ async function proxyRequest(
     });
   } catch (err) {
     return NextResponse.json(
-      { error: "Control plane unreachable", detail: String(err) },
+      { error: "Control plane unreachable" },
       { status: 502 },
     );
   }

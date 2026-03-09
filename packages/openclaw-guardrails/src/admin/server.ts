@@ -11,12 +11,13 @@ import { createRouter } from "./routes.js";
 export interface AdminServerOptions {
   store: RoleStore;
   port?: number;
+  host?: string;
   apiKey?: string;
   config?: GuardrailsConfig;
 }
 
 export function createAdminServer(options: AdminServerOptions): Server {
-  const { store, port = 18790, apiKey, config } = options;
+  const { store, port = 18790, host = "127.0.0.1", apiKey, config } = options;
   const handleRequest = createRouter();
 
   if (!apiKey) {
@@ -27,8 +28,8 @@ export function createAdminServer(options: AdminServerOptions): Server {
     await handleRequest(req, res, { store, apiKey, config });
   });
 
-  server.listen(port, () => {
-    console.log(`[safefence] Admin API listening on http://localhost:${port}`);
+  server.listen(port, host, () => {
+    console.log(`[safefence] Admin API listening on http://${host}:${port}`);
   });
 
   return server;

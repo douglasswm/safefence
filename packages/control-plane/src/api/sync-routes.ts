@@ -6,6 +6,7 @@
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
 import { eq, gt, and } from "drizzle-orm";
+import { z } from "zod";
 import type { Database } from "../db/connection.js";
 import {
   instances,
@@ -25,18 +26,25 @@ import { createInstanceToken } from "../auth/jwt.js";
 import { resolveOrgByApiKey } from "../auth/api-key.js";
 import { instanceAuth } from "../auth/middleware.js";
 import type { SseBroadcaster } from "../sync/sse-broadcaster.js";
+import {
+  registerSchema,
+  heartbeatSchema,
+  auditBatchSchema,
+  ackSchema,
+  deregisterSchema,
+  parseBody,
+} from "./schemas.js";
+
+const MAX_AUDIT_BATCH = 1000;
 
 export function createSyncRoutes(db: Database, broadcaster: SseBroadcaster): Hono {
   const app = new Hono();
 
   // ── Register ──
   app.post("/register", async (c) => {
-    const body = await c.req.json();
-    const { orgApiKey, instanceId, pluginVersion, capabilities, tags, groupId } = body;
-
-    if (!orgApiKey || !instanceId) {
-      return c.json({ error: "orgApiKey and instanceId are required" }, 400);
-    }
+    const parsed = await parseBody(c, registerSchema);
+    if (!parsed.success) return parsed.response;
+    const { orgApiKey, instanceId, pluginVersion, capabilities, tags, groupId } = parsed.data;
 
     // Verify API key
     const orgId = await resolveOrgByApiKey(db, orgApiKey);
@@ -44,24 +52,32 @@ export function createSyncRoutes(db: Database, broadcaster: SseBroadcaster): Hon
       return c.json({ error: "Invalid API key" }, 401);
     }
 
-    // Upsert instance
+    // C3: Cross-org instance takeover check
     const existing = await db.select().from(instances).where(eq(instances.id, instanceId));
-    if (existing.length === 0) {
-      await db.insert(instances).values({
-        id: instanceId,
-        orgId,
-        groupId: groupId ?? null,
+    if (existing.length > 0 && existing[0].orgId !== orgId) {
+      return c.json({ error: "Instance belongs to another organization" }, 403);
+    }
+
+    // M4: Atomic upsert (avoids TOCTOU race)
+    await db.insert(instances).values({
+      id: instanceId,
+      orgId,
+      groupId: groupId ?? null,
+      pluginVersion,
+      tags: tags ?? [],
+      status: INSTANCE_STATUS.CONNECTED,
+      registeredAt: new Date(),
+      lastHeartbeatAt: new Date(),
+    }).onConflictDoUpdate({
+      target: instances.id,
+      set: {
+        status: INSTANCE_STATUS.CONNECTED,
         pluginVersion,
         tags: tags ?? [],
-        status: INSTANCE_STATUS.CONNECTED,
-        registeredAt: new Date(),
         lastHeartbeatAt: new Date(),
-      });
-    } else {
-      await db.update(instances)
-        .set({ status: INSTANCE_STATUS.CONNECTED, pluginVersion, tags: tags ?? [], lastHeartbeatAt: new Date(), groupId: groupId ?? null })
-        .where(eq(instances.id, instanceId));
-    }
+        groupId: groupId ?? null,
+      },
+    });
 
     // Get current versions
     const versions = await db.select().from(orgVersions).where(eq(orgVersions.orgId, orgId));
@@ -86,9 +102,12 @@ export function createSyncRoutes(db: Database, broadcaster: SseBroadcaster): Hon
   // ── Heartbeat ──
   authed.post("/heartbeat", async (c) => {
     const orgId = c.get("orgId");
-    const body = await c.req.json();
-    const { instanceId, policyVersion, rbacVersion, auditCursor, metrics } = body;
+    const jwtInstanceId = c.get("instanceId")!;
+    const parsed = await parseBody(c, heartbeatSchema);
+    if (!parsed.success) return parsed.response;
+    const { policyVersion, rbacVersion, auditCursor, metrics } = parsed.data;
 
+    // H1: Use JWT instanceId, scope to org
     await db.update(instances)
       .set({
         lastHeartbeatAt: new Date(),
@@ -98,7 +117,7 @@ export function createSyncRoutes(db: Database, broadcaster: SseBroadcaster): Hon
         lastMetrics: metrics ?? null,
         status: INSTANCE_STATUS.CONNECTED,
       })
-      .where(eq(instances.id, instanceId));
+      .where(and(eq(instances.id, jwtInstanceId), eq(instances.orgId, orgId)));
 
     // Check staleness
     const versions = await db.select().from(orgVersions).where(eq(orgVersions.orgId, orgId));
@@ -115,10 +134,12 @@ export function createSyncRoutes(db: Database, broadcaster: SseBroadcaster): Hon
 
   // ── Deregister ──
   authed.post("/deregister", async (c) => {
-    const body = await c.req.json();
+    const orgId = c.get("orgId");
+    const jwtInstanceId = c.get("instanceId")!;
+    // H1: Use JWT instanceId, scope to org
     await db.update(instances)
       .set({ status: INSTANCE_STATUS.DISCONNECTED })
-      .where(eq(instances.id, body.instanceId));
+      .where(and(eq(instances.id, jwtInstanceId), eq(instances.orgId, orgId)));
     return c.json({ ok: true });
   });
 
@@ -236,15 +257,24 @@ export function createSyncRoutes(db: Database, broadcaster: SseBroadcaster): Hon
   // ── Push Audit Batch ──
   authed.post("/audit/batch", async (c) => {
     const orgId = c.get("orgId");
-    const body = await c.req.json();
-    const { instanceId, events, cursor } = body;
+    const jwtInstanceId = c.get("instanceId")!;
+    const parsed = await parseBody(c, auditBatchSchema);
+    if (!parsed.success) return parsed.response;
+    const { events, cursor } = parsed.data;
 
-    if (events?.length > 0) {
+    // M6: Server-side audit batch size limit
+    if (events && events.length > MAX_AUDIT_BATCH) {
+      return c.json({ error: `Batch size exceeds maximum of ${MAX_AUDIT_BATCH}` }, 413);
+    }
+
+    if (events && events.length > 0) {
       await db.insert(auditEvents).values(
         events.map((e: any) => ({
-          id: e.id ?? randomUUID(),
+          // L2: Always use server-generated IDs
+          id: randomUUID(),
           orgId,
-          instanceId,
+          // H1: Use JWT instanceId
+          instanceId: jwtInstanceId,
           seq: e.seq,
           timestamp: new Date(e.timestamp),
           botInstanceId: e.botInstanceId ?? null,
@@ -265,10 +295,10 @@ export function createSyncRoutes(db: Database, broadcaster: SseBroadcaster): Hon
       );
     }
 
-    // Update instance audit cursor
+    // H1: Update instance audit cursor using JWT instanceId, scoped to org
     await db.update(instances)
       .set({ auditCursor: cursor })
-      .where(eq(instances.id, instanceId));
+      .where(and(eq(instances.id, jwtInstanceId), eq(instances.orgId, orgId)));
 
     return c.json({ ackedCursor: cursor });
   });
@@ -286,15 +316,19 @@ export function createSyncRoutes(db: Database, broadcaster: SseBroadcaster): Hon
 
   // ── Ack ──
   authed.post("/ack", async (c) => {
-    const body = await c.req.json();
-    const { instanceId, policyVersion, rbacVersion } = body;
+    const orgId = c.get("orgId");
+    const jwtInstanceId = c.get("instanceId")!;
+    const parsed = await parseBody(c, ackSchema);
+    if (!parsed.success) return parsed.response;
+    const { policyVersion, rbacVersion } = parsed.data;
 
     const updates: Record<string, unknown> = {};
     if (policyVersion != null) updates.policyVersion = policyVersion;
     if (rbacVersion != null) updates.rbacVersion = rbacVersion;
 
     if (Object.keys(updates).length > 0) {
-      await db.update(instances).set(updates).where(eq(instances.id, instanceId));
+      // H1: Use JWT instanceId, scope to org
+      await db.update(instances).set(updates).where(and(eq(instances.id, jwtInstanceId), eq(instances.orgId, orgId)));
     }
 
     return c.json({ ok: true });

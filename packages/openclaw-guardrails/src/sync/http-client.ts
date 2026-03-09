@@ -45,6 +45,16 @@ export class ControlPlaneHttpClient {
     this.baseUrl = opts.baseUrl.replace(/\/$/, "");
     this.token = opts.token;
     this.timeoutMs = opts.timeoutMs ?? 10_000;
+
+    // M5: TLS warning for non-localhost
+    try {
+      const parsed = new URL(this.baseUrl);
+      if (parsed.protocol !== "https:" && parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
+        console.warn(`[safefence] WARNING: Control plane URL "${this.baseUrl}" is not using TLS. Use HTTPS for non-localhost connections.`);
+      }
+    } catch {
+      // Invalid URL will fail on first request
+    }
   }
 
   setToken(token: string): void {

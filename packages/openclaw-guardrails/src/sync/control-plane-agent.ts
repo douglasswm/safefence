@@ -285,7 +285,7 @@ export class ControlPlaneAgent {
     const instanceId = randomUUID();
     const identity: InstanceIdentity = { instanceId, registeredAt: Date.now() };
     mkdirSync(dirname(dataPath), { recursive: true });
-    writeFileSync(dataPath, JSON.stringify(identity, null, 2), "utf-8");
+    writeFileSync(dataPath, JSON.stringify(identity, null, 2), { encoding: "utf-8", mode: 0o600 });
     return instanceId;
   }
 

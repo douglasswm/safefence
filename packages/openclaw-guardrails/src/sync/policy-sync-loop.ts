@@ -5,7 +5,7 @@
 
 import type { RoleStore } from "../core/role-store.js";
 import type { GuardrailsConfig } from "../core/types.js";
-import { MUTABLE_POLICY_KEYS, setConfigValue } from "../core/policy-fields.js";
+import { MUTABLE_POLICY_KEYS, MUTABLE_POLICY_FIELD_MAP, setConfigValue, validateFieldValue } from "../core/policy-fields.js";
 import { toError } from "../utils/args.js";
 import type { ControlPlaneHttpClient } from "./http-client.js";
 import type { SyncRoleStore } from "./sync-role-store.js";
@@ -67,6 +67,15 @@ export class PolicySyncLoop {
 
       for (const policy of response.policies) {
         if (!MUTABLE_POLICY_KEYS.has(policy.key)) continue;
+        // M2: Validate synced policies before applying
+        const fieldDef = MUTABLE_POLICY_FIELD_MAP.get(policy.key);
+        if (fieldDef) {
+          const validationError = validateFieldValue(fieldDef, policy.value);
+          if (validationError) {
+            console.warn(`[safefence] Skipping invalid synced policy "${policy.key}": ${validationError}`);
+            continue;
+          }
+        }
         this.syncRoleStore.setPolicyOverride(policy.key, policy.value, policy.updatedBy ?? "control-plane");
         setConfigValue(this.config, policy.key, policy.value);
       }

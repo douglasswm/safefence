@@ -770,6 +770,11 @@ export class SqliteRoleStore implements RoleStore {
   }
 
   grantRolePermission(roleId: string, permissionId: string, effect: "allow" | "deny"): void {
+    // H5: Block system role permission modification
+    const role = this.getRole(roleId);
+    if (role?.isSystem) {
+      throw new Error(`Cannot modify permissions on system role: ${role.name}`);
+    }
     this.assertPermissionExists(permissionId);
     this.db.prepare(
       `INSERT INTO role_permissions (role_id, permission_id, effect)
@@ -784,6 +789,11 @@ export class SqliteRoleStore implements RoleStore {
   }
 
   revokeRolePermission(roleId: string, permissionId: string): void {
+    // H5: Block system role permission modification
+    const role = this.getRole(roleId);
+    if (role?.isSystem) {
+      throw new Error(`Cannot modify permissions on system role: ${role.name}`);
+    }
     this.db.prepare(
       "DELETE FROM role_permissions WHERE role_id = ? AND permission_id = ?"
     ).run(roleId, permissionId);

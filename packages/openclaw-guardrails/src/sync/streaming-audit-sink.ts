@@ -3,6 +3,7 @@
  * and flushes them to the control plane in batches via REST.
  */
 
+import { createHmac } from "node:crypto";
 import type { AuditEvent, AuditSink } from "../core/audit-sink.js";
 import { toError } from "../utils/args.js";
 import type { ControlPlaneHttpClient } from "./http-client.js";
@@ -38,6 +39,7 @@ export class StreamingAuditSink implements AuditSink {
   private seq = 0;
   private ackedCursor = 0;
   private flushing = false;
+  private prevHash = "0";
 
   constructor(opts: StreamingAuditSinkOptions) {
     this.inner = opts.inner;
@@ -81,6 +83,18 @@ export class StreamingAuditSink implements AuditSink {
 
     // Buffer for upstream sync
     this.seq += 1;
+
+    // H7: Compute hash chain
+    const eventContent = JSON.stringify({
+      seq: this.seq,
+      botInstanceId: event.botInstanceId,
+      eventType: `${event.phase}.${event.decision}`,
+      decision: event.decision,
+    });
+    const eventHash = createHmac("sha256", this.instanceId)
+      .update(this.prevHash + eventContent)
+      .digest("hex");
+
     const uploadEvent: AuditUploadEvent = {
       id: `${this.instanceId}-${this.seq}`,
       seq: this.seq,
@@ -97,11 +111,13 @@ export class StreamingAuditSink implements AuditSink {
         senderId: event.senderId,
         approvalRequestId: event.approvalRequestId,
       },
-      prevHash: "0", // Hash chain is local-only; cloud receives events without chaining
-      eventHash: "0",
+      prevHash: this.prevHash,
+      eventHash,
     };
+    this.prevHash = eventHash;
 
     if (this.buffer.length >= this.maxBufferSize) {
+      console.warn("[safefence] Buffer full, dropping oldest event");
       this.buffer.shift(); // Drop oldest
     }
     this.buffer.push(uploadEvent);

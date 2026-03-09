@@ -71,7 +71,7 @@ export class SyncRoleStore implements RoleStore {
   private queueMutation(type: MutationType, payload: Record<string, unknown>): void {
     if (!this._queuingEnabled) return;
     if (this.mutationQueue.length >= this.maxQueueSize) {
-      // Drop oldest — use splice(0,1) which is clearer about intent
+      console.warn("[safefence] Buffer full, dropping oldest event");
       this.mutationQueue.splice(0, 1);
     }
     this.mutationQueue.push({

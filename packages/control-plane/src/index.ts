@@ -15,7 +15,11 @@ import { createManagementRoutes } from "./api/management-routes.js";
 import { SseBroadcaster } from "./sync/sse-broadcaster.js";
 
 const PORT = parseInt(process.env.PORT ?? "3100", 10);
-const JWT_SECRET = process.env.JWT_SECRET ?? "safefence-dev-secret-change-in-production";
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error("FATAL: JWT_SECRET environment variable is required. Exiting.");
+  process.exit(1);
+}
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 const DATABASE_URL = process.env.DATABASE_URL;
 

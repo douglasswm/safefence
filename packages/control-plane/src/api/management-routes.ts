@@ -36,6 +36,15 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
   // ── Organizations (no auth for create; API key for all others) ──
 
   app.post("/orgs", async (c) => {
+    // H3: Gate org creation with optional bootstrap secret
+    const bootstrapSecret = process.env.BOOTSTRAP_SECRET;
+    if (bootstrapSecret) {
+      const provided = c.req.header("X-Bootstrap-Secret");
+      if (provided !== bootstrapSecret) {
+        return c.json({ error: "Invalid or missing bootstrap secret" }, 401);
+      }
+    }
+
     const body = await c.req.json();
     const id = randomUUID();
     const apiKey = generateApiKey();
@@ -67,12 +76,18 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
   });
 
   authed.delete("/orgs/:orgId/instances/:id", async (c) => {
+    const orgId = c.get("orgId");
     const instanceId = c.req.param("id");
-    await db.update(instances)
+    // H2: Scope delete to authenticated org
+    const result = await db.update(instances)
       .set({ status: INSTANCE_STATUS.DEREGISTERED })
-      .where(eq(instances.id, instanceId));
+      .where(and(eq(instances.id, instanceId), eq(instances.orgId, orgId)))
+      .returning({ id: instances.id });
+    if (result.length === 0) {
+      return c.json({ error: "Instance not found" }, 404);
+    }
     // Notify instance
-    await broadcaster.publish(c.get("orgId"), { type: "revoked" });
+    await broadcaster.publish(orgId, { type: "revoked" });
     return c.json({ ok: true });
   });
 

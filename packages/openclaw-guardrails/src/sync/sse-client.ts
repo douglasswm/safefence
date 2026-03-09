@@ -141,7 +141,11 @@ export class SseClient {
       }
       if (data) {
         try {
-          parsed.push(JSON.parse(data) as SyncEvent);
+          const event = JSON.parse(data);
+          // L1: Validate SSE event structure
+          if (typeof event.type === "string") {
+            parsed.push(event as SyncEvent);
+          }
         } catch {
           // Skip malformed events
         }
