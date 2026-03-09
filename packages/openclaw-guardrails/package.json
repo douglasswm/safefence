@@ -20,7 +20,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "preversion": "npm test && npm run build",
+    "preversion": "pnpm test && pnpm run build",
     "version": "bash scripts/sync-version.sh",
     "postversion": "echo '\nRun this to publish via CI:\n  git push origin master --tags'"
   },
@@ -45,6 +45,9 @@
   "license": "MIT",
   "bin": {
     "safefence": "dist/cli/index.js"
+  },
+  "dependencies": {
+    "@safefence/types": "workspace:*"
   },
   "peerDependencies": {
     "better-sqlite3": ">=11.0.0",

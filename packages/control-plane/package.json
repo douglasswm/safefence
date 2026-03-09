@@ -18,6 +18,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@safefence/types": "workspace:*",
     "hono": "^4.6.0",
     "drizzle-orm": "^0.38.0",
     "postgres": "^3.4.0",

@@ -78,6 +78,9 @@ export interface SyncEvent {
 // Policy Sync
 // ═══════════════════════════════════════════
 
+import type { PolicyScope } from "@safefence/types";
+export type { PolicyScope } from "@safefence/types";
+
 export interface PolicyOverrideRecord {
   key: string;
   value: unknown;
@@ -87,8 +90,6 @@ export interface PolicyOverrideRecord {
   updatedBy?: string;
   updatedAt: number;
 }
-
-export type PolicyScope = "org" | "group" | "instance";
 
 export interface PolicySyncResponse {
   policies: PolicyOverrideRecord[];

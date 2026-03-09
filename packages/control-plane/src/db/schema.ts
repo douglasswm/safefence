@@ -20,36 +20,19 @@ import {
 import { relations } from "drizzle-orm";
 
 // ═══════════════════════════════════════════
-// Shared constants
+// Shared constants (re-exported from @safefence/types)
 // ═══════════════════════════════════════════
 
-export type InstanceStatus = "registered" | "active" | "connected" | "disconnected" | "deregistered" | "stale";
-export type PolicyScope = "org" | "group" | "instance";
-export type AuditDecision = "allow" | "deny";
+import { INSTANCE_STATUS, POLICY_SCOPE, AUDIT_DECISION } from "@safefence/types";
+
+export type { InstanceStatus, PolicyScope, AuditDecision } from "@safefence/types";
+export { INSTANCE_STATUS, POLICY_SCOPE, AUDIT_DECISION };
+
+// Local types (control-plane only)
 export type PlanTier = "free" | "pro" | "enterprise";
 export type AssignmentScopeType = "project" | "global";
 export type PermissionEffect = "allow" | "deny";
 export type BotAccessPolicy = "owner_only" | "team" | "public";
-
-export const INSTANCE_STATUS = {
-  REGISTERED: "registered" as const,
-  ACTIVE: "active" as const,
-  CONNECTED: "connected" as const,
-  DISCONNECTED: "disconnected" as const,
-  DEREGISTERED: "deregistered" as const,
-  STALE: "stale" as const,
-};
-
-export const POLICY_SCOPE = {
-  ORG: "org" as const,
-  GROUP: "group" as const,
-  INSTANCE: "instance" as const,
-};
-
-export const AUDIT_DECISION = {
-  ALLOW: "allow" as const,
-  DENY: "deny" as const,
-};
 
 // ═══════════════════════════════════════════
 // Organizations

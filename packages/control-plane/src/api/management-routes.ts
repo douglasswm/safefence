@@ -118,52 +118,49 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
     const key = c.req.param("key");
     const body = await c.req.json();
 
-    // Upsert policy
-    const id = randomUUID();
-    const existing = await db.select().from(policyCurrent).where(
-      and(eq(policyCurrent.orgId, orgId), eq(policyCurrent.key, key), eq(policyCurrent.scope, POLICY_SCOPE.ORG))
-    );
+    const result = await db.transaction(async (tx) => {
+      const newVersion = await bumpPolicyVersion(tx, orgId);
 
-    // Atomic version bump via SQL increment
-    const newVersion = await bumpPolicyVersion(db, orgId);
+      const [upserted] = await tx
+        .insert(policyCurrent)
+        .values({
+          id: randomUUID(), orgId, key,
+          value: body.value, scope: POLICY_SCOPE.ORG,
+          version: newVersion, updatedBy: body.updatedBy,
+        })
+        .onConflictDoUpdate({
+          target: [policyCurrent.orgId, policyCurrent.key, policyCurrent.scope, policyCurrent.scopeId],
+          set: { value: body.value, version: newVersion, updatedBy: body.updatedBy, updatedAt: new Date() },
+        })
+        .returning({ id: policyCurrent.id });
 
-    if (existing.length > 0) {
-      await db.update(policyCurrent)
-        .set({ value: body.value, version: newVersion, updatedBy: body.updatedBy, updatedAt: new Date() })
-        .where(eq(policyCurrent.id, existing[0].id));
-
-      await db.insert(policyVersions).values({
-        id: randomUUID(), orgId, policyId: existing[0].id, key,
-        value: body.value, scope: POLICY_SCOPE.ORG, version: newVersion, changedBy: body.updatedBy,
-      });
-    } else {
-      await db.insert(policyCurrent).values({
-        id, orgId, key, value: body.value, scope: POLICY_SCOPE.ORG,
-        version: newVersion, updatedBy: body.updatedBy,
+      await tx.insert(policyVersions).values({
+        id: randomUUID(), orgId, policyId: upserted.id, key,
+        value: body.value, scope: POLICY_SCOPE.ORG,
+        version: newVersion, changedBy: body.updatedBy,
       });
 
-      await db.insert(policyVersions).values({
-        id: randomUUID(), orgId, policyId: id, key,
-        value: body.value, scope: POLICY_SCOPE.ORG, version: newVersion, changedBy: body.updatedBy,
-      });
-    }
+      return { key, version: newVersion };
+    });
 
-    await broadcaster.publish(orgId, { type: "policy_changed", key, version: newVersion });
-
-    return c.json({ key, version: newVersion });
+    await broadcaster.publish(orgId, { type: "policy_changed", key, version: result.version });
+    return c.json(result);
   });
 
   authed.delete("/orgs/:orgId/policies/:key", async (c) => {
     const orgId = c.get("orgId");
     const key = c.req.param("key");
 
-    await db.delete(policyCurrent).where(
-      and(eq(policyCurrent.orgId, orgId), eq(policyCurrent.key, key), eq(policyCurrent.scope, POLICY_SCOPE.ORG))
-    );
+    const result = await db.transaction(async (tx) => {
+      await tx.delete(policyCurrent).where(
+        and(eq(policyCurrent.orgId, orgId), eq(policyCurrent.key, key), eq(policyCurrent.scope, POLICY_SCOPE.ORG))
+      );
+      const newVersion = await bumpPolicyVersion(tx, orgId);
+      return { key, deleted: true, version: newVersion };
+    });
 
-    const newVersion = await bumpPolicyVersion(db, orgId);
-    await broadcaster.publish(orgId, { type: "policy_changed", key, version: newVersion });
-    return c.json({ key, deleted: true, version: newVersion });
+    await broadcaster.publish(orgId, { type: "policy_changed", key: result.key, version: result.version });
+    return c.json(result);
   });
 
   // ── RBAC: Roles ──
@@ -286,7 +283,7 @@ export function createManagementRoutes(db: Database, broadcaster: SseBroadcaster
 }
 
 /** Atomically bump policy version via SQL increment, returning the new version. */
-async function bumpPolicyVersion(db: Database, orgId: string): Promise<number> {
+async function bumpPolicyVersion(db: Pick<Database, "update">, orgId: string): Promise<number> {
   const result = await db.update(orgVersions)
     .set({
       policyVersion: sql`${orgVersions.policyVersion} + 1`,
@@ -299,7 +296,7 @@ async function bumpPolicyVersion(db: Database, orgId: string): Promise<number> {
 
 /** Atomically bump RBAC version, record mutation, and publish notification. */
 async function bumpRbacVersion(
-  db: Database,
+  db: Pick<Database, "update" | "insert">,
   orgId: string,
   broadcaster: SseBroadcaster,
   mutationType: string,
