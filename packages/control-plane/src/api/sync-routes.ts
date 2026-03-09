@@ -59,7 +59,7 @@ export function createSyncRoutes(db: Database, broadcaster: SseBroadcaster): Hon
       });
     } else {
       await db.update(instances)
-        .set({ status: "connected", pluginVersion, tags: tags ?? [], lastHeartbeatAt: new Date(), groupId: groupId ?? null })
+        .set({ status: INSTANCE_STATUS.CONNECTED, pluginVersion, tags: tags ?? [], lastHeartbeatAt: new Date(), groupId: groupId ?? null })
         .where(eq(instances.id, instanceId));
     }
 

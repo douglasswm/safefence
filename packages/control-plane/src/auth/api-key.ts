@@ -35,11 +35,9 @@ export async function resolveOrgByApiKey(db: Database, key: string): Promise<str
   // Fast path: lookup by prefix (typically 0-1 rows)
   const byPrefix = await db.select().from(organizations)
     .where(eq(organizations.apiKeyPrefix, prefix));
-  const prefixResults = await Promise.all(
-    byPrefix.map(async (org) => (await verifyApiKey(key, org.apiKeyHash)) ? org.id : null),
-  );
-  const prefixMatch = prefixResults.find(Boolean);
-  if (prefixMatch) return prefixMatch;
+  for (const org of byPrefix) {
+    if (await verifyApiKey(key, org.apiKeyHash)) return org.id;
+  }
 
   // Slow path: sequential scan with short-circuit (bcrypt is CPU-bound,
   // parallel would saturate the libuv thread pool without early exit)
